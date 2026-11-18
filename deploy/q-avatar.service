@@ -1,0 +1,22 @@
+[Unit]
+Description=q-avatar image API (behind nginx)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qavatar
+Group=qavatar
+WorkingDirectory=/opt/q-avatar
+ExecStart=/usr/local/bin/node server/production.ts
+Restart=on-failure
+RestartSec=5
+# 安全限制：只能写日志和用量目录，不能提权
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/q-avatar/logs /opt/q-avatar/data
+
+[Install]
+WantedBy=multi-user.target

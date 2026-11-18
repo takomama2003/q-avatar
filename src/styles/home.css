@@ -1,0 +1,94 @@
+/* 首页：橱窗式首屏、四步流程、五个系列、展示柜、放心玩、常见问题、结尾行动区。 */
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); align-items: center; gap: 48px; padding: 56px 0 24px; }
+.hero h1 { font-size: 54px; line-height: 1.2; }
+.hero .subtitle { font-size: 17px; line-height: 1.8; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; }
+.hero-actions .btn { padding: 15px 26px; font-size: 16px; }
+.hero-facts { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0 0; padding: 0; list-style: none; }
+.hero-facts li { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgb(255 253 248 / .8); border: 1.5px solid var(--line); font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.hero-facts svg { width: 16px; height: 16px; color: var(--grape); }
+.hero-visual { position: relative; height: 500px; margin: 16px 0 34px; }
+.hero-visual .box { height: 100%; margin: 0 0 0 40px; transform: rotate(1.5deg); box-shadow: inset 0 0 0 1.5px #e5d9c3, 0 30px 60px -36px rgb(83 58 134 / .55); }
+.hero-visual .window { min-height: 0; }
+.hero-photo { position: absolute; z-index: 6; left: -8px; bottom: 42px; transform: rotate(-7deg); }
+.hero-photo .polaroid img { width: 112px; height: 132px; }
+.hero-photo .polaroid { transform: none; }
+.hero-arrow { position: absolute; z-index: 6; left: 108px; bottom: 150px; width: 88px; height: 48px; color: var(--grape); stroke-width: 2.2; }
+.hero-chip { position: absolute; z-index: 6; padding: 8px 14px; border-radius: 999px; background: #fff; box-shadow: 0 10px 24px -14px rgb(43 35 55 / .5); font: 400 15px/1 var(--font-display); color: var(--grape-deep); white-space: nowrap; }
+.hero-chip.one { bottom: 232px; left: -18px; transform: rotate(-6deg); }
+.hero-chip.two { bottom: -34px; right: 36px; transform: rotate(3deg); background: var(--butter); color: var(--grape-shadow); }
+
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.step-card { position: relative; padding: 24px 22px 22px; border: 1.5px solid var(--line); border-radius: 24px; background: var(--card); }
+.step-card::after { content: ""; position: absolute; top: 50%; right: -16px; width: 14px; border-top: 2px dashed var(--lavender-2); }
+.step-card:last-child::after { display: none; }
+.step-card .step-no { margin-bottom: 14px; }
+.step-card svg { width: 30px; height: 30px; margin-bottom: 12px; color: var(--grape); }
+.step-card h3 { margin: 0 0 6px; font: 400 20px/1.3 var(--font-display); }
+.step-card p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--ink-2); }
+
+.series { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.series-card { position: relative; display: flex; flex-direction: column; padding: 14px 14px 18px; border-radius: 24px; background: var(--box); box-shadow: inset 0 0 0 1.5px #e5d9c3; transition: transform .3s var(--ease-pop), box-shadow .3s; }
+.series-card:hover { transform: translateY(-6px) rotate(-1deg); box-shadow: inset 0 0 0 1.5px var(--grape), 0 20px 34px -24px rgb(83 58 134 / .6); }
+.series-no { font: 600 12px/1 var(--font-latin); letter-spacing: 1.6px; color: var(--grape-deep); }
+.series-window { margin: 10px 0 14px; padding: 12px; border-radius: 80px 80px 14px 14px / 64px 64px 14px 14px; background: var(--stage); box-shadow: inset 0 0 0 1.5px rgb(111 82 168 / .3); }
+.series-window svg { width: 100%; height: auto; }
+.series-card h3 { margin: 0; font: 400 20px/1.3 var(--font-display); }
+.series-card p { margin: 4px 0 12px; font-size: 13.5px; color: var(--ink-2); }
+.series-cta { margin-top: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700; color: var(--grape-deep); }
+.series-cta svg { width: 16px; height: 16px; stroke-width: 2.2; transition: transform .25s var(--ease-pop); }
+.series-card:hover .series-cta svg { transform: translateX(3px); }
+
+.shelf { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; padding-bottom: 18px; border-bottom: 10px solid #e9dcc4; border-radius: 0 0 6px 6px; }
+.shelf-slot { display: grid; place-content: center; justify-items: center; gap: 10px; min-height: 200px; border: 2px dashed var(--lavender-2); border-radius: 22px; color: var(--grape-deep); font-size: 15px; font-weight: 700; text-align: center; padding: 16px; transition: background-color .2s, border-color .2s; }
+.shelf-slot:hover { background: rgb(236 228 247 / .55); border-color: var(--grape); }
+.shelf-slot svg { width: 34px; height: 34px; padding: 6px; border-radius: 50%; background: var(--lavender); stroke-width: 2.2; }
+.shelf .sample-card .work-meta { padding-top: 12px; }
+
+.trust { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.trust-card { padding: 24px; border: 1.5px solid var(--line); border-radius: 24px; background: var(--card); }
+.trust-icon { width: 46px; height: 46px; display: grid; place-items: center; margin-bottom: 14px; border-radius: 15px; background: var(--lavender); color: var(--grape); }
+.trust-icon svg { width: 24px; height: 24px; }
+.trust-card h3 { margin: 0 0 8px; font-size: 17px; font-weight: 700; }
+.trust-card p { margin: 0; font-size: 14px; line-height: 1.75; color: var(--ink-2); }
+.trust-card a { display: inline-block; margin-top: 10px; font-size: 14px; font-weight: 700; color: var(--grape-deep); }
+
+.faq-preview { max-width: 860px; }
+.cta-band { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; margin-top: 80px; padding: 44px 48px; border-radius: 32px; background: var(--grape); color: #fff; overflow: hidden; box-shadow: 0 6px 0 var(--grape-shadow); }
+.cta-band::before { content: ""; position: absolute; inset: 0; background-image: radial-gradient(circle, rgb(255 255 255 / .14) 1.2px, transparent 1.7px); background-size: 22px 22px; pointer-events: none; }
+.cta-band h2 { position: relative; margin: 0; font: 400 34px/1.3 var(--font-display); }
+.cta-band p { position: relative; margin: 8px 0 0; color: rgb(255 255 255 / .85); }
+.cta-band .btn { position: relative; background: var(--butter); color: var(--grape-shadow); box-shadow: 0 4px 0 #c9a93e; }
+.cta-band .btn:hover { background: #f7df8a; }
+
+@media (max-width: 1080px) {
+  .hero h1 { font-size: 46px; }
+  .series { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .step-card::after { display: none; }
+}
+@media (max-width: 800px) {
+  .hero { grid-template-columns: 1fr; gap: 28px; padding-top: 32px; }
+  .hero h1 { font-size: 38px; }
+  .hero-visual { height: 420px; margin-bottom: 40px; }
+  .hero-visual .box { margin-left: 24px; }
+  .shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trust { grid-template-columns: 1fr; }
+  .cta-band { padding: 32px 26px; }
+  .cta-band h2 { font-size: 28px; }
+}
+@media (max-width: 480px) {
+  .hero h1 { font-size: 32px; }
+  .hero-visual { height: 360px; }
+  .hero-chip.one { left: 24px; }
+  .hero-chip.two { right: 8px; }
+  .hero-visual .box { margin-left: 14px; }
+  .hero-photo { left: -4px; bottom: 30px; }
+  .hero-photo .polaroid img { width: 84px; height: 100px; }
+  .hero-arrow { display: none; }
+  .steps { grid-template-columns: 1fr; }
+  .series { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .series-card h3 { font-size: 18px; }
+}
+/* 小屏上贴纸往里挪一点：盖章动画开头放大 1.5 倍并旋转，靠边时会短暂撑出横向滚动 */
+@media (max-width: 480px) { .hero-chip.one { display: none; } .hero-visual .sticker { right: 32px; } }

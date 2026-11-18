@@ -1,0 +1,7 @@
+/* 样式按用途拆在 styles/ 下：base 是配色变量和通用元素，site 是导航和页脚等公共部分，其余按页面分。 */
+@import "./styles/base.css";
+@import "./styles/site.css";
+@import "./styles/studio.css";
+@import "./styles/home.css";
+@import "./styles/gallery.css";
+@import "./styles/help.css";

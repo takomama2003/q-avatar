@@ -1,0 +1,152 @@
+import { computed, reactive, ref } from 'vue'
+import { DEFAULT_OPTIONS, MAX_DESCRIPTION, type CreationOptions } from '../../shared/options'
+import { AccessCodeError, detectMode, generateDemo, generateWithModel, type GenerationResult, type ServiceMode } from '../services/generator'
+import { addWorks } from './history'
+
+// 工坊的状态放在页面之外：切到画廊或帮助页时，照片、选项和正在进行的生成都不会丢。
+// 只存在内存里，刷新页面就清空（不保存上传的照片）。
+const mode = ref<ServiceMode>({ kind: 'demo' })
+const modeReady = ref(false)
+const photo = ref<File | null>(null)
+const photoUrl = ref('')
+const options = reactive<CreationOptions>({ ...DEFAULT_OPTIONS })
+const busy = ref(false)
+const validating = ref(false)
+const error = ref('')
+const failed = ref(false)
+const status = ref('')
+const result = ref<GenerationResult | null>(null)
+const selected = ref(0)
+const elapsed = ref(0)
+// 生成完成但用户还没回到工坊看：导航栏显示小圆点，并弹出提示
+const unseen = ref(false)
+let ticker = 0
+let selection = 0
+let detecting: Promise<void> | null = null
+
+// 公网部署时真实生成要口令；没填口令就按演示模式运行。口令存在本机浏览器，下次不用再输。
+const CODE_KEY = 'tim-pet-access-code'
+const accessCode = ref(readStoredCode())
+const needsCode = computed(() => mode.value.kind === 'model' && mode.value.needsCode)
+const modelName = computed(() => mode.value.kind === 'model' && (!mode.value.needsCode || accessCode.value) ? mode.value.model : '')
+const locked = computed(() => busy.value || validating.value)
+const charCount = computed(() => Array.from(options.description).length)
+const current = computed(() => result.value?.images[selected.value] ?? null)
+
+function clearResult() {
+  for (const image of result.value?.images ?? []) URL.revokeObjectURL(image.url)
+  result.value = null
+  selected.value = 0
+}
+
+function init() {
+  detecting ??= (async () => {
+    mode.value = await detectMode()
+    modeReady.value = true
+    if (mode.value.kind === 'demo' && mode.value.problem) status.value = `未启用真实生成：${mode.value.problem}`
+    // 检测完成前就选了照片：按检测出的模式更新提示，避免真实模式下还显示“可以生成示例”。
+    else if (photo.value && !busy.value) status.value = readyText()
+  })()
+  return detecting
+}
+const readyText = () => modelName.value ? '照片已就绪，可以生成了。' : '照片已就绪，可以生成示例。'
+
+async function choose(files: FileList | File[]) {
+  if (locked.value) return
+  error.value = ''
+  const candidate = files[0]
+  if (files.length !== 1 || !candidate) { error.value = '请一次选择一张照片。'; return }
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(candidate.type)) { error.value = '请选择 JPG、PNG 或 WebP 图片。'; return }
+  if (candidate.size > 10 * 1024 * 1024) { error.value = '照片不能超过 10 MiB，请压缩后重试。'; return }
+  const ticket = ++selection
+  const url = URL.createObjectURL(candidate)
+  validating.value = true
+  try {
+    const image = new Image()
+    image.src = url
+    await image.decode()
+    if (ticket !== selection) { URL.revokeObjectURL(url); return }
+    if (photoUrl.value) URL.revokeObjectURL(photoUrl.value)
+    photo.value = candidate
+    photoUrl.value = url
+    clearResult(); failed.value = false
+    status.value = readyText()
+  } catch { URL.revokeObjectURL(url); error.value = '无法读取这张图片，请选择其他照片。' }
+  finally { validating.value = false }
+}
+
+function removePhoto() {
+  if (locked.value) return
+  selection++
+  if (photoUrl.value) URL.revokeObjectURL(photoUrl.value)
+  photo.value = null; photoUrl.value = ''; clearResult(); failed.value = false; error.value = ''; status.value = ''
+}
+
+function readStoredCode() {
+  try { return localStorage.getItem(CODE_KEY) ?? '' } catch { return '' }
+}
+function setAccessCode(value: string) {
+  if (locked.value) return
+  accessCode.value = value.trim()
+  try {
+    if (accessCode.value) localStorage.setItem(CODE_KEY, accessCode.value)
+    else localStorage.removeItem(CODE_KEY)
+  } catch { /* 隐私模式下存不了，本次页面内仍然有效 */ }
+  error.value = ''
+  if (photo.value && !busy.value) status.value = readyText()
+}
+
+function setDescription(value: string) {
+  options.description = Array.from(value).slice(0, MAX_DESCRIPTION).join('')
+}
+
+// 画廊里“用同样的设置再做”：照片没有保存，需要重新上传。
+function applyOptions(next: CreationOptions) {
+  if (locked.value) return
+  Object.assign(options, { ...next, description: Array.from(next.description).slice(0, MAX_DESCRIPTION).join('') })
+  status.value = photo.value ? '已套用这组设置，可以直接生成。' : '已套用这组设置。原照片没有保存，请重新上传一张。'
+}
+
+async function generate() {
+  if (locked.value || !modeReady.value) return false
+  if (!photo.value) { error.value = '请先上传一张照片。'; return false }
+  const model = modelName.value
+  const count = options.count
+  busy.value = true; error.value = ''; unseen.value = false
+  status.value = model ? `正在用 ${model} 生成${count > 1 ? ` ${count} 张` : ''}，可能需要一两分钟，请不要刷新页面。` : '正在准备示例…'
+  const started = performance.now()
+  elapsed.value = 0
+  if (model) ticker = window.setInterval(() => { elapsed.value = Math.floor((performance.now() - started) / 1000) }, 1000)
+  try {
+    const input = { photo: photo.value, options: { ...options } }
+    const next = model ? await generateWithModel(input, model, needsCode.value ? accessCode.value : '') : await generateDemo(input)
+    clearResult(); result.value = next; failed.value = false; unseen.value = true
+    const n = next.images.length
+    const seconds = Math.max(1, Math.round((performance.now() - started) / 1000))
+    status.value = model
+      ? `生成完成，用时 ${seconds} 秒。${n > 1 ? `这 ${n} 张图` : '这张图'}根据你上传的照片由 ${model} 生成。${next.warning ? next.warning : ''}`
+      : `${n > 1 ? `${n} 张` : ''}示例已准备好。此图片不是根据上传照片生成的。`
+    void addWorks(next)
+    return true
+  } catch (reason) {
+    failed.value = true
+    error.value = reason instanceof Error ? reason.message : '生成失败，请手动重试。'
+    status.value = '生成失败；照片和设置已保留。'
+    if (reason instanceof AccessCodeError) {
+      busy.value = false
+      setAccessCode('')
+      error.value = reason.message
+      status.value = '口令不正确，已切回演示模式。重新输入口令后再生成。'
+    }
+    return false
+  } finally {
+    window.clearInterval(ticker)
+    busy.value = false
+  }
+}
+
+const studio = {
+  mode, modeReady, modelName, needsCode, accessCode, photo, photoUrl, options, busy, validating, locked, error, failed, status, result, selected, current,
+  elapsed, unseen, charCount, init, choose, removePhoto, setDescription, setAccessCode, applyOptions, generate,
+}
+export function useStudio() { return studio }

@@ -1,0 +1,98 @@
+:root {
+  --paper: #f8f3e8;
+  --card: #fffdf8;
+  --box: #f0e7d6;
+  --stage: #f1efec;
+  --ink: #2b2337;
+  --ink-2: #5c5266;
+  --ink-3: #716779;
+  --line: #e6dccb;
+  --grape: #6f52a8;
+  --grape-deep: #533a86;
+  --grape-shadow: #3f2a6b;
+  --lavender: #ece4f7;
+  --lavender-2: #d9cbee;
+  --butter: #f3d56b;
+  --danger: #a2362a;
+  --danger-bg: #fdeee9;
+  --font-display: "ZCOOL KuaiLe", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --font-latin: "Fredoka Variable", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-pop: cubic-bezier(.34, 1.56, .64, 1);
+  color-scheme: light;
+  font-family: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--paper);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; position: relative; isolation: isolate; }
+/* 纸张颗粒与顶部网点，营造印刷包装的质感。 */
+body::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .14;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .32 0 0 0 0 .25 0 0 0 0 .2 0 0 0 .4 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+body::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 560px;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgb(111 82 168 / .16) 1.1px, transparent 1.6px);
+  background-size: 22px 22px;
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent);
+  mask-image: linear-gradient(to bottom, #000, transparent);
+}
+button, input, textarea { font: inherit; color: inherit; }
+button, a, textarea { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:disabled { cursor: default; }
+a { color: inherit; text-decoration: none; }
+:focus-visible { outline: 3px solid var(--grape); outline-offset: 3px; border-radius: 10px; }
+svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.polaroid { margin: 0; padding: 6px 6px 8px; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgb(43 35 55 / .1), 0 10px 22px -12px rgb(43 35 55 / .4); transform: rotate(-3deg); }
+.polaroid img { display: block; width: 96px; height: 96px; object-fit: cover; border-radius: 3px; background: var(--stage); }
+.polaroid figcaption { max-width: 96px; margin-top: 6px; font: 400 13px/1.35 var(--font-display); color: var(--ink-2); text-align: center; }
+.polaroid figcaption span { white-space: nowrap; }
+.polaroid.tilt { transform: rotate(3deg); }
+.polaroid.small { flex: none; padding: 5px 5px 14px; }
+.polaroid.small img { width: 78px; height: 92px; }
+.reveal { animation: rise .7s var(--ease-out) calc(var(--i, 0) * 90ms) backwards; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+@keyframes pop { from { opacity: 0; transform: translateY(16px) scale(.94); } }
+@keyframes stamp { from { opacity: 0; transform: rotate(-30deg) scale(1.5); } }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { opacity: .35; transform: scale(.75); } }
+@keyframes bob { 50% { transform: translateY(-4px); } }
+@keyframes nudge { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+@keyframes twinkle { 50% { transform: rotate(18deg) scale(.88); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .spinner { animation-duration: 1.2s !important; animation-iteration-count: infinite !important; }
+  .box.loading .window::before { display: none; }
+}
+h1, h2, h3 { text-wrap: balance; }
+h1 { margin: 0; font: 400 44px/1.25 var(--font-display); letter-spacing: 1px; }
+/* 标题里的荧光笔高亮：<mark class="hl"> */
+.hl { color: var(--grape); padding: 0 4px; background: linear-gradient(transparent 62%, rgb(243 213 107 / .65) 62% 90%, transparent 90%); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.nowrap { white-space: nowrap; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#main-content:focus { outline: none; }
+@media (max-width: 800px) { h1 { font-size: 34px; } }
+@media (max-width: 480px) {
+  h1 { font-size: 30px; }
+  .polaroid img { width: 84px; height: 84px; }
+  .polaroid figcaption { max-width: 84px; }
+  .polaroid.small img { width: 70px; height: 84px; }
+}
+mark.hl { color: var(--grape); background-color: transparent; }
