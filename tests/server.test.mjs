@@ -232,8 +232,41 @@ describe('POST /api/generate', () => {
       fresh((req, res) => req.url === '/files/result.png' ? fail(res) : json(res, 200, { created: 1, data: [{ url: `${upstream.url}/files/result.png` }] }))
       const response = await post(api.url, photoForm())
       assert.equal(response.status, 502)
-      assert.match((await response.json()).error, /下载失败|没有返回可用的图片/)
+      assert.match((await response.json()).error, /下载图片链接失败|没有返回可用的图片/)
     }
+  })
+
+  test('下载图片链接卡住时换个连接重试；链接失效（4xx）不重试', async () => {
+    const quick = await apiServer({ OPENAI_API_KEY: KEY, OPENAI_BASE_URL: `${upstream.url}/v1` }, { downloadStallMs: 150 })
+    try {
+      // 前两次：一次连上后一直不回，一次发了一半就不动；第三次正常
+      let downloads = 0
+      fresh((req, res) => {
+        if (req.url !== '/files/result.png') return json(res, 200, { created: 1, data: [{ url: `${upstream.url}/files/result.png` }] })
+        downloads++
+        if (downloads === 1) return
+        if (downloads === 2) { res.writeHead(200, { 'content-type': 'image/png', 'content-length': String(PNG.length) }); return res.write(PNG.subarray(0, 10)) }
+        res.writeHead(200, { 'content-type': 'image/png' }); res.end(PNG)
+      })
+      const response = await post(quick.url, photoForm())
+      assert.equal(response.status, 200)
+      assert.deepEqual((await response.json()).images.map(dataUrlBytes), [PNG])
+      assert.equal(downloads, 3)
+      assert.ok(quick.logs.some(line => /第 1 次下载失败：0 秒没有收到数据/.test(line)), quick.logs.join('\n'))
+      assert.ok(quick.logs.some(line => /第 3 次下载成功/.test(line)))
+      // 每次都卡住：重试 4 次后放弃，提示可能已经扣费
+      downloads = 0
+      fresh((req, res) => req.url === '/files/result.png' ? void downloads++ : json(res, 200, { created: 1, data: [{ url: `${upstream.url}/files/result.png` }] }))
+      const stuck = await post(quick.url, photoForm())
+      assert.equal(stuck.status, 502)
+      assert.match((await stuck.json()).error, /多次下载图片链接都失败了[\s\S]*可能已经扣费/)
+      assert.equal(downloads, 4)
+      // 链接过期（403）：重试也没用，只下载一次
+      downloads = 0
+      fresh((req, res) => req.url === '/files/result.png' ? (downloads++, res.writeHead(403), res.end()) : json(res, 200, { created: 1, data: [{ url: `${upstream.url}/files/result.png` }] }))
+      assert.equal((await post(quick.url, photoForm())).status, 502)
+      assert.equal(downloads, 1)
+    } finally { upstream.server.closeAllConnections(); quick.server.close() }
   })
 
   test('流式返回：跳过预览图，取最终图片；事件跨数据块也能解析', async () => {

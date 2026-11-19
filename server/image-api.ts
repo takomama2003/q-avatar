@@ -16,6 +16,7 @@ export const MAX_PHOTO_BYTES = 10 * 1024 * 1024
 const MAX_BODY_BYTES = MAX_PHOTO_BYTES + 1024 * 1024
 const MAX_RESULT_BYTES = 30 * 1024 * 1024
 const UPSTREAM_TIMEOUT_MS = 300_000
+const DOWNLOAD_STALL_MS = 20_000
 const QUALITIES: readonly string[] = ['low', 'medium', 'high', 'auto']
 const IMAGE_TYPES = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp' } as const
 type ImageKind = keyof typeof IMAGE_TYPES
@@ -110,9 +111,11 @@ const lock = ((globalThis as { __timPetImageLock?: { busy: boolean } }).__timPet
 
 // 返回挂在 /api 下的中间件：GET /config 告诉前端用哪种模式，POST /generate 调用模型。
 // access 只在公网部署时传入（server/production.ts）：凭口令生成，并限制次数。本地开发不传。
-export function createImageApi(options: { env: () => Env; log?: Log; timeoutMs?: number; access?: AccessGuard }) {
+// downloadStallMs：下载图片链接时多久没收到数据就算卡住、换个连接重试（测试里调小）。
+export function createImageApi(options: { env: () => Env; log?: Log; timeoutMs?: number; downloadStallMs?: number; access?: AccessGuard }) {
   const log = options.log ?? (() => {})
   const timeoutMs = options.timeoutMs ?? UPSTREAM_TIMEOUT_MS
+  const stallMs = options.downloadStallMs ?? DOWNLOAD_STALL_MS
   const access = options.access
   return async function imageApi(req: IncomingMessage, res: ServerResponse) {
     try {
@@ -140,7 +143,7 @@ export function createImageApi(options: { env: () => Env; log?: Log; timeoutMs?:
       // 一次只跑一张，避免重复点击或多开页面造成重复扣费。
       if (lock.busy) return sendJson(req, res, 429, { error: '上一张还在生成，请等它完成后再试。' })
       lock.busy = true
-      try { await generate(req, res, setup, log, timeoutMs, gate) }
+      try { await generate(req, res, setup, log, { timeoutMs, stallMs }, gate) }
       finally { lock.busy = false }
     } catch (error) {
       log(`[image-api] 未预期的错误：${brief(error, '')}`)
@@ -152,7 +155,10 @@ export function createImageApi(options: { env: () => Env; log?: Log; timeoutMs?:
 
 type Gate = { access: AccessGuard; holder: Holder }
 
-async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready, log: Log, timeoutMs: number, gate?: Gate) {
+type Timing = { timeoutMs: number; stallMs: number }
+
+async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready, log: Log, timing: Timing, gate?: Gate) {
+  const { timeoutMs } = timing
   if (Number(req.headers['content-length'] ?? 0) > MAX_BODY_BYTES) return sendJson(req, res, 413, { error: TOO_LARGE })
   const contentType = req.headers['content-type'] ?? ''
   if (!contentType.toLowerCase().startsWith('multipart/form-data')) return sendJson(req, res, 415, { error: '请求格式不对，请刷新页面后重试。' })
@@ -187,7 +193,7 @@ async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready,
   // 一张一个请求、同时发出：每个请求都能流式返回，总耗时约等于最慢的一张。
   const settled = await Promise.allSettled(Array.from({ length: options.count }, (_, index) => {
     const label = options.count > 1 ? `第 ${index + 1} 张` : ''
-    return generateOne(setup, bytes, kind, options, deadline, timeoutMs, newTrace(message => log(`[image-api] ${label ? `${label} · ` : ''}${seconds(started)}s · ${message}`)))
+    return generateOne(setup, bytes, kind, options, deadline, timing, newTrace(message => log(`[image-api] ${label ? `${label} · ` : ''}${seconds(started)}s · ${message}`)))
   }))
   const images: GeneratedImage[] = []
   const failures: ReturnType<typeof describeUpstreamError>[] = []
@@ -237,7 +243,8 @@ function clearlyNotBilled(error: unknown) {
 
 type GeneratedImage = { bytes: Uint8Array; kind: ImageKind; usage?: Usage; partials: number }
 
-async function generateOne(setup: Ready, bytes: Uint8Array, kind: ImageKind, options: CreationOptions, deadline: AbortSignal, timeoutMs: number, trace: Trace): Promise<GeneratedImage> {
+async function generateOne(setup: Ready, bytes: Uint8Array, kind: ImageKind, options: CreationOptions, deadline: AbortSignal, timing: Timing, trace: Trace): Promise<GeneratedImage> {
+  const { timeoutMs, stallMs } = timing
   // maxRetries 为 0：失败时交给用户手动重试，不在后台悄悄重复扣费。
   const client = new OpenAI({ apiKey: setup.apiKey, baseURL: setup.baseURL, organization: null, project: null, timeout: timeoutMs, maxRetries: 0 })
   try {
@@ -258,7 +265,7 @@ async function generateOne(setup: Ready, bytes: Uint8Array, kind: ImageKind, opt
     const result = await readResult(raw, deadline, trace)
     trace.note(`读完结果 ${size(trace.bytes)}，${result.b64 ? '图片在响应里（base64）' : result.url ? `图片是链接（${hostOf(result.url)}）` : '没有图片'}`)
     trace.stage = 'download'
-    const image = result.b64 ? Buffer.from(result.b64, 'base64') : result.url ? await download(result.url, deadline) : null
+    const image = result.b64 ? Buffer.from(result.b64, 'base64') : result.url ? await download(result.url, deadline, stallMs, trace) : null
     const resultKind = image ? sniffImage(image) : null
     if (!image || !resultKind) throw new UpstreamShapeError('模型服务没有返回可用的图片。如果用的是中转服务，请确认它支持图片编辑接口（/images/edits）。')
     return { bytes: image, kind: resultKind, usage: result.usage, partials: result.partials }
@@ -327,7 +334,8 @@ class UpstreamShapeError extends Error {
     this.status = options?.status ?? 502
   }
 }
-const DOWNLOAD_FAILED = '模型服务返回了图片链接，但后端下载失败，请检查网络或代理后重试。'
+const DOWNLOAD_FAILED = '模型已经生成了图片，但服务器多次下载图片链接都失败了，可能是到图片存储的网络不稳定。这次可能已经扣费，请稍后重试。'
+const DOWNLOAD_REJECTED = '模型返回了图片链接，但下载图片链接失败了（链接可能已过期或不存在）。这次可能已经扣费，请稍后重试。'
 const MAX_EVENT_CHARS = 48 * 1024 * 1024
 type Usage = { input_tokens?: number; output_tokens?: number }
 // partials 为 -1 表示上游没有按流式返回（部分中转会忽略 stream 参数，直接给普通 JSON）。
@@ -448,20 +456,71 @@ function readBody(req: IncomingMessage, limit: number) {
   })
 }
 
-// 下载也算在同一个总时限里，后端最长耗时不会超过浏览器的等待时间。不带密钥。
-async function download(url: string, deadline: AbortSignal) {
+// 下载图片链接。图片已经生成并扣费，重新下载不会再扣费，所以网络卡住时换个连接重试。
+// 国内服务器连海外存储（如 S3）时，常见握手要等十几秒、或下载到一半不动；
+// 按“多久没收到数据”判断卡住，而不是只看总时长。全部尝试都算在同一个总时限里。不带密钥。
+const DOWNLOAD_ATTEMPTS = 4
+class DownloadStatusError extends Error {
+  status: number
+  constructor(status: number) { super(`http ${status}`); this.status = status }
+}
+// 链接过期、不存在、图片太大，重试也没用；网络卡住、断开、上游 5xx 值得再试。
+const worthRetry = (error: unknown) => !(error instanceof DownloadStatusError && error.status < 500 && error.status !== 408 && error.status !== 429)
+  && !(error instanceof Error && error.message === 'too large')
+
+async function download(url: string, deadline: AbortSignal, stallMs: number, trace: Trace) {
+  let target: URL
   try {
-    const target = new URL(url)
+    target = new URL(url)
     if (target.protocol !== 'https:' && target.protocol !== 'http:') throw new Error(`protocol ${target.protocol}`)
-    const response = await fetch(target, { signal: AbortSignal.any([deadline, AbortSignal.timeout(60_000)]) })
-    if (!response.ok) throw new Error(`http ${response.status}`)
+  } catch (error) { throw new UpstreamShapeError(DOWNLOAD_REJECTED, { cause: error }) }
+  let lastError: unknown
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
+    try {
+      const bytes = await downloadOnce(target, deadline, stallMs, trace)
+      if (attempt > 1) trace.note(`第 ${attempt} 次下载成功，${size(bytes.length)}`)
+      return bytes
+    } catch (error) {
+      if (deadline.aborted) throw error
+      lastError = error
+      trace.note(`第 ${attempt} 次下载失败：${brief(error, '')}`)
+      if (!worthRetry(error)) break
+    }
+  }
+  throw new UpstreamShapeError(worthRetry(lastError) ? DOWNLOAD_FAILED : DOWNLOAD_REJECTED, { cause: lastError })
+}
+
+async function downloadOnce(target: URL, deadline: AbortSignal, stallMs: number, trace: Trace) {
+  const stall = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const watch = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => stall.abort(new Error(`${Math.round(stallMs / 1000)} 秒没有收到数据`)), stallMs)
+  }
+  watch()
+  try {
+    const response = await fetch(target, { signal: AbortSignal.any([deadline, stall.signal]) })
+    if (!response.ok) throw new DownloadStatusError(response.status)
     if (Number(response.headers.get('content-length') ?? 0) > MAX_RESULT_BYTES) throw new Error('too large')
-    const bytes = Buffer.from(await response.arrayBuffer())
-    if (bytes.length > MAX_RESULT_BYTES) throw new Error('too large')
-    return bytes
+    if (!response.body) throw new Error('empty body')
+    const chunks: Uint8Array[] = []
+    let total = 0
+    const reader = response.body.getReader()
+    for (;;) {
+      watch() // 每收到一块数据就重新计时
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      trace.bytes += value.byteLength
+      if (total > MAX_RESULT_BYTES) { void reader.cancel().catch(() => {}); throw new Error('too large') }
+      chunks.push(value)
+    }
+    return Buffer.concat(chunks)
   } catch (error) {
-    if (deadline.aborted) throw error
-    throw new UpstreamShapeError(DOWNLOAD_FAILED, { cause: error })
+    // 被“卡住”计时器中止时，报出卡住的原因，而不是笼统的 AbortError
+    throw stall.signal.aborted && !deadline.aborted ? stall.signal.reason : error
+  } finally {
+    clearTimeout(timer)
   }
 }
 
