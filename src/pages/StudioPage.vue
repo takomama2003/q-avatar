@@ -215,9 +215,9 @@ onBeforeUnmount(() => { window.removeEventListener('dragover', blockStrayDrop); 
         </div>
 
         <div v-if="needsCode" class="access">
-          <div class="field-heading"><label for="access-code"><h3>访问口令</h3></label><span class="field-meta">{{ accessCode ? '已填写 · 真实生成' : '未填写 · 演示模式' }}</span></div>
-          <input id="access-code" class="access-input" type="password" autocomplete="off" :value="accessCode" :disabled="locked" placeholder="输入口令后才会真实生成" @change="onAccessCode">
-          <p class="field-hint">真实生成按张计费，所以需要口令。没有口令也可以体验演示模式。</p>
+          <div class="field-heading"><label for="access-code"><h3>邀请码</h3></label><span class="field-meta">{{ accessCode ? '已填写 · 真实生成' : '未填写 · 演示模式' }}</span></div>
+          <input id="access-code" class="access-input" type="password" autocomplete="off" :value="accessCode" :disabled="locked" placeholder="输入邀请码后才会真实生成" @change="onAccessCode">
+          <p class="field-hint">真实生成按张计费，所以需要邀请码，每个邀请码有自己的额度。没有邀请码也可以体验演示模式。</p>
         </div>
 
         <p v-if="error" :key="error" class="error" role="alert">

@@ -5,6 +5,7 @@ import http from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createAccessGuard, readAccessPolicy } from './access.ts'
+import { codesPath, codeUsagePath, dataDir } from './codes.ts'
 import { createImageApi, describeSetup, readImageSetup } from './image-api.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -33,7 +34,9 @@ if (setup.status === 'ready' && !policy) {
   process.exit(1)
 }
 
-const access = policy ? createAccessGuard(policy, { usageFile: join(root, 'data', 'usage.json') }) : undefined
+// 数据目录默认是项目下的 data/；本地试跑时可以用 Q_AVATAR_DATA_DIR 指到临时目录。
+const data = dataDir()
+const access = policy ? createAccessGuard(policy, { usageFile: join(data, 'usage.json'), codesFile: codesPath(data), codeUsageFile: codeUsagePath(data) }) : undefined
 const api = createImageApi({ env: () => process.env, log, access })
 
 const port = Number(process.env.PORT ?? 8787)

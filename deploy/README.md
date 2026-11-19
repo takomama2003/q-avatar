@@ -12,14 +12,32 @@
 
 ## 访问控制（.env）
 
-```
-ACCESS_CODE=...          # 真实生成要输入的口令，至少 6 个字符；没有它后端拒绝启动
+```ini
+ACCESS_CODE=...          # 主口令（站长自己用），至少 6 个字符，不受个人额度限制；没有它后端拒绝启动
 DAILY_IMAGE_LIMIT=20     # 每天最多生成多少张（所有人合计，北京时间零点重置）
 IP_HOURLY_LIMIT=6        # 每个 IP 每小时最多发起几次生成
 PORT=8787
 ```
 
 改完执行 `sudo systemctl restart q-avatar`。
+
+上游明确拒绝（余额不足、参数错误、没通过审核、连不上）的张数会退回额度；超时等可能已经扣费的照常计入。
+
+## 邀请码管理
+
+给朋友发邀请码，每人一个码、各有总额度。在服务器上用后端的运行账户执行：
+
+```bash
+cd /opt/q-avatar
+sudo -u qavatar node server/codes.ts add 小王 --quota 10   # 新建（默认 10 张），邀请码只显示这一次
+sudo -u qavatar node server/codes.ts list                  # 总额度、已用、剩余、状态、最近使用
+sudo -u qavatar node server/codes.ts quota 小王 20          # 把总额度改成 20
+sudo -u qavatar node server/codes.ts disable 小王           # 停用；enable 恢复
+```
+
+- 清单在 `data/codes.json`，只存邀请码的 SHA-256；每人用量在 `data/code-usage.json`。
+- 后端自动读取清单的修改，不用重启。
+- 邀请码忘了不能找回，只能停用后用新名字再建一个。
 
 ## 首次部署
 

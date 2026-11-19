@@ -9,6 +9,7 @@ export interface GenerationResult {
   source: 'demo' | 'model'
   model?: string
   warning?: string
+  quotaLeft?: number // 用邀请码生成时，这个邀请码还剩几张
 }
 export type ServiceMode = { kind: 'demo'; problem?: string } | { kind: 'model'; model: string; needsCode: boolean; remainingToday?: number }
 // 口令错误时抛出这个错误，页面据此清掉保存的口令、让用户重新输入。
@@ -77,5 +78,6 @@ export async function generateWithModel(input: GenerationInput, model: string, a
     images.push({ url: URL.createObjectURL(blob), blob, extension: extensionOf(blob.type) })
   }
   if (!images.length) throw new Error('后端没有返回图片，请查看终端日志。')
-  return { images, options: { ...input.options }, source: 'model', model, warning: typeof body?.warning === 'string' ? body.warning : undefined }
+  const quotaLeft = typeof body?.quotaLeft === 'number' ? body.quotaLeft : undefined
+  return { images, options: { ...input.options }, source: 'model', model, warning: typeof body?.warning === 'string' ? body.warning : undefined, quotaLeft }
 }

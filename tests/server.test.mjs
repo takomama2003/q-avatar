@@ -1,7 +1,7 @@
 // 后端测试：用本地假上游服务器模拟模型接口，不调用真实 API，不花钱。运行：npm run test:server
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { buildPrompt, createImageApi, isLocalRequest, normalizeBaseURL, readImageSetup } from '../server/image-api.ts'
 import { DEFAULT_OPTIONS, STYLES } from '../shared/options.ts'
 import { clientIp, createAccessGuard, readAccessPolicy } from '../server/access.ts'
+import { codesPath, codeUsagePath, runCodes } from '../server/codes.ts'
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01])
@@ -508,6 +509,11 @@ describe('POST /api/generate', () => {
 describe('公网部署的访问控制', () => {
   const CODE = 'open-sesame-42'
   const policy = (extra = {}) => readAccessPolicy({ ACCESS_CODE: CODE, ...extra })
+  const tmp = () => mkdtemp(join(tmpdir(), 'tim-pet-access-'))
+  const guardIn = (dir, extra = {}, now) => createAccessGuard(policy(extra), { usageFile: join(dir, 'usage.json'), codesFile: codesPath(dir), codeUsageFile: codeUsagePath(dir), now })
+  // 用命令行工具建邀请码，返回邀请码原文
+  const addCode = (dir, name, quota) => runCodes(['add', name, '--quota', String(quota)], dir).match(/邀请码：(\S+)/)[1]
+
   test('读取配置：没有口令不启用；口令太短或数字不合法时报错', () => {
     assert.equal(readAccessPolicy({}), null)
     assert.deepEqual(policy(), { code: CODE, dailyImages: 20, ipHourly: 6, timeZone: 'Asia/Shanghai' })
@@ -524,7 +530,7 @@ describe('公网部署的访问控制', () => {
     assert.equal(clientIp(req('127.0.0.1')), '127.0.0.1')
   })
 
-  test('没有口令或口令错误时不读照片、不调用模型；正确口令可以生成', async () => {
+  test('没有口令或口令错误时不读照片、不调用模型；主口令可以生成', async () => {
     const upstream = await fakeUpstream()
     upstream.reply = ok()
     const access = createAccessGuard(policy())
@@ -538,9 +544,11 @@ describe('公网部署的访问控制', () => {
       assert.equal(upstream.requests.length, 0)
       const good = await post(api.url, photoForm(), { 'x-access-code': ` ${CODE} ` })
       assert.equal(good.status, 200)
+      assert.equal((await good.json()).quotaLeft, undefined, '主口令没有个人额度')
       assert.equal(upstream.requests.length, 1)
       assert.equal((await (await fetch(`${api.url}/api/config`)).json()).remainingToday, 19)
-      assert.ok(api.logs.some(line => /拒绝 127\.0\.0\.1：访问口令不正确/.test(line)))
+      assert.ok(api.logs.some(line => /拒绝 127\.0\.0\.1：邀请码不正确/.test(line)))
+      assert.ok(api.logs.some(line => /生成完成 .*主口令/.test(line)))
       assert.ok(!api.logs.join('\n').includes(CODE), '日志里不出现口令')
     } finally { api.server.close(); upstream.server.close() }
   })
@@ -554,44 +562,131 @@ describe('公网部署的访问控制', () => {
     const send = (count, ip = '203.0.113.7') => post(api.url, photoForm({ count }), { 'x-access-code': CODE, 'x-real-ip': ip })
     try {
       assert.equal((await send(2)).status, 200)
-      // 同一 IP 第 3 次：超过每小时 2 次
       assert.equal((await send(1)).status, 200)
       const hourly = await send(1)
       assert.equal(hourly.status, 429)
       assert.match((await hourly.json()).error, /每小时最多生成 2 次/)
-      // 换个 IP：每天总共 3 张已经用完
       const daily = await send(1, '198.51.100.9')
       assert.equal(daily.status, 429)
       assert.match((await daily.json()).error, /今天的生成次数已经用完/)
       assert.equal(upstream.requests.length, 3)
-      // 第二天额度恢复；一小时后同一 IP 也可以再生成
       clock += 24 * 60 * 60 * 1000
       assert.equal((await send(1)).status, 200)
-      // 超过剩余额度的张数会被拒绝，并说明还剩几张
       const tooMany = await send(4, '198.51.100.9')
       assert.equal(tooMany.status, 429)
       assert.match((await tooMany.json()).error, /只剩 2 张/)
     } finally { api.server.close(); upstream.server.close() }
   })
 
-  test('输错口令太多次后，同一 IP 一小时内正确口令也被拒绝', async () => {
+  test('输错口令太多次后，同一 IP 一小时内正确口令也被拒绝', () => {
     const access = createAccessGuard(policy())
     const req = (code, ip = '203.0.113.7') => ({ socket: { remoteAddress: '127.0.0.1' }, headers: { 'x-real-ip': ip, 'x-access-code': code } })
-    for (let i = 0; i < 10; i++) assert.equal(access.checkCode(req('nope-nope'))?.status, 401)
-    assert.equal(access.checkCode(req(CODE))?.status, 429)
-    assert.equal(access.checkCode(req(CODE, '198.51.100.9')), null)
+    for (let i = 0; i < 10; i++) assert.equal(access.authorize(req('nope-nope')).denied?.status, 401)
+    assert.equal(access.authorize(req(CODE)).denied?.status, 429)
+    assert.deepEqual(access.authorize(req(CODE, '198.51.100.9')), { holder: { kind: 'owner' } })
   })
 
   test('当天已用张数写入文件，重启后仍然计数', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tim-pet-usage-'))
-    const usageFile = join(dir, 'data', 'usage.json')
+    const dir = await tmp()
     const now = () => Date.parse('2026-11-17T10:00:00+08:00')
     const req = { socket: { remoteAddress: '127.0.0.1' }, headers: {} }
     try {
-      const first = createAccessGuard(policy({ DAILY_IMAGE_LIMIT: '5' }), { usageFile, now })
-      assert.equal(first.reserve(req, 3), null)
-      const restarted = createAccessGuard(policy({ DAILY_IMAGE_LIMIT: '5' }), { usageFile, now })
-      assert.equal(restarted.remainingToday(), 2)
+      const first = guardIn(dir, { DAILY_IMAGE_LIMIT: '5' }, now)
+      assert.ok('reservation' in first.reserve(req, { kind: 'owner' }, 3))
+      assert.equal(guardIn(dir, { DAILY_IMAGE_LIMIT: '5' }, now).remainingToday(), 2)
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+
+  test('邀请码：各有总额度，用完拒绝；停用后拒绝；改额度和加人不用重启', async () => {
+    const dir = await tmp()
+    const upstream = await fakeUpstream()
+    upstream.reply = ok()
+    const access = guardIn(dir)
+    const api = await apiServer({ OPENAI_API_KEY: KEY, OPENAI_BASE_URL: `${upstream.url}/v1` }, { access })
+    const send = (code, count = 1) => post(api.url, photoForm({ count }), { 'x-access-code': code, 'x-real-ip': `198.51.100.${Math.floor(Math.random() * 200) + 1}` })
+    try {
+      const wang = addCode(dir, '小王', 2)
+      const first = await send(wang)
+      assert.equal(first.status, 200)
+      assert.equal((await first.json()).quotaLeft, 1)
+      const tooMany = await send(wang, 2)
+      assert.equal(tooMany.status, 429)
+      assert.match((await tooMany.json()).error, /只剩 1 张/)
+      assert.equal((await send(wang)).status, 200)
+      const empty = await send(wang)
+      assert.equal(empty.status, 429)
+      assert.match((await empty.json()).error, /额度用完了/)
+      // 主口令不受个人额度影响
+      assert.equal((await send(CODE)).status, 200)
+      // 命令行改额度、加人，后端立即生效
+      runCodes(['quota', '小王', '5'], dir)
+      assert.equal((await send(wang)).status, 200)
+      const li = addCode(dir, '小李', 1)
+      assert.equal((await send(li)).status, 200)
+      runCodes(['disable', '小李'], dir)
+      const off = await send(li)
+      assert.equal(off.status, 403)
+      assert.equal((await off.json()).code, 'bad_code')
+      runCodes(['enable', '小李'], dir)
+      assert.equal((await send(li)).status, 429, '恢复后额度仍按已用计算')
+      assert.ok(api.logs.some(line => /生成完成 .*邀请码 小王/.test(line)))
+      // 文件和日志里都没有邀请码原文
+      const files = [await readFile(codesPath(dir), 'utf8'), await readFile(codeUsagePath(dir), 'utf8')].join('\n')
+      for (const code of [wang, li]) {
+        assert.ok(!files.includes(code), '数据文件里不存邀请码原文')
+        assert.ok(!api.logs.join('\n').includes(code), '日志里不出现邀请码')
+      }
+      const listing = runCodes(['list'], dir)
+      assert.match(listing, /小王\t5\t3\t2\t正常/)
+      assert.match(listing, /小李\t1\t1\t0\t正常/)
+    } finally { api.server.close(); upstream.server.close(); await rm(dir, { recursive: true, force: true }) }
+  })
+
+  test('上游明确拒绝的张数退回额度；超时不退；部分失败只退失败的', async () => {
+    const dir = await tmp()
+    const upstream = await fakeUpstream()
+    const access = guardIn(dir)
+    const api = await apiServer({ OPENAI_API_KEY: KEY, OPENAI_BASE_URL: `${upstream.url}/v1` }, { access, timeoutMs: 300 })
+    const send = (code, count = 1) => post(api.url, photoForm({ count }), { 'x-access-code': code, 'x-real-ip': `198.51.100.${Math.floor(Math.random() * 200) + 1}` })
+    try {
+      const code = addCode(dir, '小张', 10)
+      upstream.reply = (req, res) => json(res, 403, { error: { message: '用户额度不足', code: 'insufficient_user_quota' } })
+      const rejected = await send(code)
+      assert.equal(rejected.status, 502)
+      assert.equal((await rejected.json()).quotaLeft, 10, '余额不足时没扣费，额度退回')
+      assert.equal(access.remainingToday(), 20)
+      assert.ok(api.logs.some(line => /退回额度 1 张（邀请码 小张）/.test(line)))
+      // 超时：上游可能已经在生成并扣费，不退
+      upstream.reply = () => {}
+      const slow = await send(code)
+      assert.equal(slow.status, 504)
+      assert.equal((await slow.json()).quotaLeft, 9)
+      // 一次 3 张，第 2 张被拒绝：只退 1 张
+      let calls = 0
+      upstream.reply = (req, res) => (++calls === 2 ? json(res, 400, { error: { message: 'bad request' } }) : ok()(req, res))
+      const partial = await send(code, 3)
+      assert.equal(partial.status, 200)
+      const body = await partial.json()
+      assert.equal(body.failed, 1)
+      assert.equal(body.quotaLeft, 7)
+    } finally { upstream.server.closeAllConnections(); api.server.close(); upstream.server.close(); await rm(dir, { recursive: true, force: true }) }
+  })
+
+  test('命令行工具：参数校验、重名、只显示一次邀请码', async () => {
+    const dir = await tmp()
+    try {
+      assert.match(runCodes(['list'], dir), /还没有邀请码/)
+      const output = runCodes(['add', '小陈'], dir)
+      assert.match(output, /总额度 10 张/)
+      assert.match(output, /邀请码：[a-km-np-z2-9]{4}-[a-km-np-z2-9]{4}-[a-km-np-z2-9]{4}/)
+      assert.throws(() => runCodes(['add', '小陈'], dir), /已经有叫“小陈”/)
+      assert.throws(() => runCodes(['quota', '没这人', '3'], dir), /没有叫“没这人”/)
+      assert.throws(() => runCodes(['quota', '小陈', '-1'], dir), /0 到 100000/)
+      assert.throws(() => runCodes(['add', ''], dir), /名字不能为空/)
+      assert.throws(() => runCodes(['what'], dir), /用法/)
+      const saved = JSON.parse(await readFile(codesPath(dir), 'utf8'))
+      assert.equal(saved.codes.length, 1)
+      assert.equal(saved.codes[0].hash.length, 64)
     } finally { await rm(dir, { recursive: true, force: true }) }
   })
 })

@@ -3,7 +3,7 @@ import OpenAI, { APIConnectionError, APIConnectionTimeoutError, APIError, APIUse
 // 后端直接用 node 运行（测试），所以这里的 import 要写 .ts 扩展名。
 import { BACKGROUNDS, COMPOSITIONS, DEFAULT_OPTIONS, EXPRESSIONS, MAX_COUNT, MAX_DESCRIPTION, POSES, PROPORTIONS, RATIOS, STYLES } from '../shared/options.ts'
 import type { BackgroundId, Composition, CreationOptions, ExpressionId, PoseId, ProportionId, StyleId } from '../shared/options.ts'
-import { clientIp, type AccessGuard } from './access.ts'
+import { clientIp, holderLabel, type AccessGuard, type Holder, type Reservation } from './access.ts'
 
 // 本地后端：把照片转发给兼容 OpenAI 接口的图像模型。密钥只在服务端读取，不进入前端代码。
 type Quality = 'low' | 'medium' | 'high' | 'auto'
@@ -128,15 +128,19 @@ export function createImageApi(options: { env: () => Env; log?: Log; timeoutMs?:
       if (req.method !== 'POST') return sendJson(req, res, 405, { error: '只支持 POST。' })
       if (setup.status !== 'ready') return sendJson(req, res, 503, { error: setup.status === 'invalid' ? setup.problem : '后端未配置 OPENAI_API_KEY，当前只能使用演示模式。' })
       // 先核对口令再接收照片：口令不对的请求不占锁，也不读上传内容。
-      const denied = access?.checkCode(req)
-      if (denied) {
-        log(`[image-api] 拒绝 ${clientIp(req)}：${denied.error}`)
-        return sendJson(req, res, denied.status, { error: denied.error, code: denied.status === 401 ? 'bad_code' : undefined })
+      let gate: Gate | undefined
+      if (access) {
+        const checked = access.authorize(req)
+        if ('denied' in checked) {
+          log(`[image-api] 拒绝 ${clientIp(req)}：${checked.denied.error}`)
+          return sendJson(req, res, checked.denied.status, { error: checked.denied.error, code: checked.denied.status === 401 || checked.denied.status === 403 ? 'bad_code' : undefined })
+        }
+        gate = { access, holder: checked.holder }
       }
       // 一次只跑一张，避免重复点击或多开页面造成重复扣费。
       if (lock.busy) return sendJson(req, res, 429, { error: '上一张还在生成，请等它完成后再试。' })
       lock.busy = true
-      try { await generate(req, res, setup, log, timeoutMs, access) }
+      try { await generate(req, res, setup, log, timeoutMs, gate) }
       finally { lock.busy = false }
     } catch (error) {
       log(`[image-api] 未预期的错误：${brief(error, '')}`)
@@ -146,7 +150,9 @@ export function createImageApi(options: { env: () => Env; log?: Log; timeoutMs?:
   }
 }
 
-async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready, log: Log, timeoutMs: number, access?: AccessGuard) {
+type Gate = { access: AccessGuard; holder: Holder }
+
+async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready, log: Log, timeoutMs: number, gate?: Gate) {
   if (Number(req.headers['content-length'] ?? 0) > MAX_BODY_BYTES) return sendJson(req, res, 413, { error: TOO_LARGE })
   const contentType = req.headers['content-type'] ?? ''
   if (!contentType.toLowerCase().startsWith('multipart/form-data')) return sendJson(req, res, 415, { error: '请求格式不对，请刷新页面后重试。' })
@@ -164,16 +170,20 @@ async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready,
   const options = readOptions(form)
   if (typeof options === 'string') return sendJson(req, res, 400, { error: options })
   // 输入都合格后才占用额度：传错参数不算次数。
-  const limited = access?.reserve(req, options.count)
-  if (limited) {
-    log(`[image-api] 拒绝 ${clientIp(req)}：${limited.error}`)
-    return sendJson(req, res, limited.status, { error: limited.error })
+  let reservation: Reservation | undefined
+  if (gate) {
+    const reserved = gate.access.reserve(req, gate.holder, options.count)
+    if ('denied' in reserved) {
+      log(`[image-api] 拒绝 ${clientIp(req)}（${holderLabel(gate.holder)}）：${reserved.denied.error}`)
+      return sendJson(req, res, reserved.denied.status, { error: reserved.denied.error })
+    }
+    reservation = reserved.reservation
   }
 
   const started = performance.now()
   // 整个请求（包括读完流式结果）的总时限。SDK 自带的 timeout 只管到收到响应头为止。
   const deadline = AbortSignal.timeout(timeoutMs)
-  const what = `${options.composition} · ${options.style} · ${options.count} 张`
+  const what = `${options.composition} · ${options.style} · ${options.count} 张${gate ? ` · ${holderLabel(gate.holder)}` : ''}`
   // 一张一个请求、同时发出：每个请求都能流式返回，总耗时约等于最慢的一张。
   const settled = await Promise.allSettled(Array.from({ length: options.count }, (_, index) => {
     const label = options.count > 1 ? `第 ${index + 1} 张` : ''
@@ -181,14 +191,24 @@ async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready,
   }))
   const images: GeneratedImage[] = []
   const failures: ReturnType<typeof describeUpstreamError>[] = []
+  let unbilled = 0
   for (const item of settled) {
     if (item.status === 'fulfilled') images.push(item.value)
-    else failures.push(describeUpstreamError(item.reason, setup))
+    else {
+      failures.push(describeUpstreamError(item.reason, setup))
+      if (clearlyNotBilled(item.reason)) unbilled++
+    }
   }
+  // 上游直接拒绝或连不上的那几张没有扣费，退回额度；超时等说不准的照常计入。
+  if (gate && reservation && unbilled) {
+    gate.access.refund(reservation, unbilled)
+    log(`[image-api] 退回额度 ${unbilled} 张（${holderLabel(gate.holder)}）：上游明确拒绝，未扣费`)
+  }
+  const quotaLeft = gate?.access.quotaLeft(gate.holder)
   if (!images.length) {
     const first = failures[0]
     log(`[image-api] 生成失败 ${what} · ${seconds(started)}s · ${first.log}`)
-    return sendJson(req, res, first.status, { error: first.message })
+    return sendJson(req, res, first.status, { error: first.message, quotaLeft })
   }
   const usage = images.reduce((sum, image) => ({ input: sum.input + (image.usage?.input_tokens ?? 0), output: sum.output + (image.usage?.output_tokens ?? 0) }), { input: 0, output: 0 })
   const tokens = images.some(image => image.usage) ? ` · tokens 输入 ${usage.input} / 输出 ${usage.output}` : ''
@@ -200,7 +220,19 @@ async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready,
     images: images.map(image => `data:${IMAGE_TYPES[image.kind]};base64,${Buffer.from(image.bytes).toString('base64')}`),
     failed: failures.length,
     warning: failures.length ? `有 ${failures.length} 张没有生成成功：${failures[0].message}` : undefined,
+    quotaLeft,
   })
+}
+
+// 上游返回了明确的 4xx 拒绝（参数、密钥、余额、审核、频率），或者根本没连上：这一张没有扣费。
+// 超时、5xx、524 时上游可能已经在生成并扣费，不算在这里。
+const UNBILLED_STATUSES = [400, 401, 403, 404, 413, 422, 429]
+// 连接错误里只有“请求根本没发出去”的几种算未扣费；连接中途被重置时请求可能已经到了上游。
+const NEVER_SENT = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH']
+function clearlyNotBilled(error: unknown) {
+  if (error instanceof APIConnectionTimeoutError) return false
+  if (error instanceof APIConnectionError) return NEVER_SENT.includes(rootCause(error.cause))
+  return error instanceof APIError && typeof error.status === 'number' && UNBILLED_STATUSES.includes(error.status)
 }
 
 type GeneratedImage = { bytes: Uint8Array; kind: ImageKind; usage?: Usage; partials: number }

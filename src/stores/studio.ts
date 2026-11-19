@@ -124,7 +124,7 @@ async function generate() {
     const n = next.images.length
     const seconds = Math.max(1, Math.round((performance.now() - started) / 1000))
     status.value = model
-      ? `生成完成，用时 ${seconds} 秒。${n > 1 ? `这 ${n} 张图` : '这张图'}根据你上传的照片由 ${model} 生成。${next.warning ? next.warning : ''}`
+      ? `生成完成，用时 ${seconds} 秒。${n > 1 ? `这 ${n} 张图` : '这张图'}根据你上传的照片由 ${model} 生成。${next.warning ? next.warning : ''}${next.quotaLeft !== undefined ? ` 你的邀请码还剩 ${next.quotaLeft} 张。` : ''}`
       : `${n > 1 ? `${n} 张` : ''}示例已准备好。此图片不是根据上传照片生成的。`
     void addWorks(next)
     return true
@@ -136,7 +136,7 @@ async function generate() {
       busy.value = false
       setAccessCode('')
       error.value = reason.message
-      status.value = '口令不正确，已切回演示模式。重新输入口令后再生成。'
+      status.value = '邀请码不可用，已切回演示模式。重新输入后再生成。'
     }
     return false
   } finally {
