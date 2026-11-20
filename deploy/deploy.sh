@@ -66,7 +66,7 @@ fi
 step "4/6 上传"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-git archive --format=tar.gz -o "$tmp/src.tar.gz" HEAD -- "${FILES[@]}"
+git -c core.autocrlf=false archive --format=tar.gz -o "$tmp/src.tar.gz" HEAD -- "${FILES[@]}"  # 保持仓库里的 LF 换行
 tar -czf "$tmp/dist.tar.gz" dist
 scp -q -o BatchMode=yes "$tmp/src.tar.gz" "$tmp/dist.tar.gz" "$SERVER:/tmp/"
 echo "已上传"
