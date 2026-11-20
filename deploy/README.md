@@ -4,7 +4,8 @@
 
 ## 结构
 
-- nginx 监听 80 端口：直接发 `/opt/q-avatar/dist` 里的网页，`/api/` 转发给本机 8787 端口。配置：`nginx-q-avatar.conf` → `/etc/nginx/sites-available/q-avatar`。
+- nginx 监听 443（HTTPS）：直接发 `/opt/q-avatar/dist` 里的网页，`/api/` 转发给本机 8787 端口。80 端口只给证书验证用，其余请求跳转到 https。配置：`nginx-q-avatar.conf` → `/etc/nginx/sites-available/q-avatar`。
+- HTTPS 证书：Let's Encrypt 的 IP 证书，约 6 天有效，见下面“HTTPS 证书”。
 - 后端 `node server/production.ts` 只监听 127.0.0.1:8787，由 systemd 管理，开机自启、出错自动重启，用系统用户 `qavatar` 运行。配置：`q-avatar.service` → `/etc/systemd/system/q-avatar.service`。
 - Node.js v24.22.3 装在 `/opt/node/current`，链接到 `/usr/local/bin/node`。
 - 服务器上的 `/opt/q-avatar/.env`（root:qavatar，640）存放 API 密钥和访问控制配置，不在仓库里。
@@ -40,7 +41,7 @@ sudo -u qavatar node server/codes.ts disable 小王           # 停用；enable 
 
 ## 首次部署
 
-1. 云服务商的安全组放行 TCP 22 和 80，8787 不要放行。
+1. 云服务商的安全组放行 TCP 22、80、443，8787 不要放行。
 2. 在服务器上安装 nginx 和 Node.js（22.18 以上，建议 24 LTS；下载后按 nodejs.org 公布的 SHA256 校验）：
 
    ```bash
@@ -74,7 +75,8 @@ sudo -u qavatar node server/codes.ts disable 小王           # 停用；enable 
    sudo systemctl daemon-reload && sudo systemctl enable --now q-avatar
    ```
 
-6. 打开 `http://<服务器IP>` 检查：不填口令只能用演示模式，填入口令后能真实生成。
+6. 按下面“HTTPS 证书”申请证书。
+7. 打开 `https://<服务器IP>` 检查：不填口令只能用演示模式，填入口令后能真实生成。
 
 ## 一键部署
 
@@ -120,6 +122,47 @@ sudo systemctl restart q-avatar && systemctl is-active q-avatar'
 
 只改了网页、没改后端时，最后不重启也可以，刷新页面即生效。
 
+## HTTPS 证书
+
+用 Let's Encrypt 的 IP 地址证书（2026 年起开放）。IP 证书只能是短期证书，**约 6 天有效**，所以必须自动续期。
+
+**安装 certbot**（需要 5.4 以上；Ubuntu 软件源里的 2.9 太旧，单独装在 `/opt/certbot`，不动系统 Python）：
+
+```bash
+sudo apt-get install -y python3.12-venv
+sudo python3 -m venv /opt/certbot
+sudo /opt/certbot/bin/pip install -i https://mirrors.cloud.tencent.com/pypi/simple/ "certbot>=5.4,<6"
+sudo ln -s /opt/certbot/bin/certbot /usr/local/bin/certbot
+```
+
+**申请证书**（nginx 的 80 端口先按 `nginx-q-avatar.conf` 配好 `/.well-known/acme-challenge/`；先加 `--staging` 试一次，成功再去掉）：
+
+```bash
+sudo mkdir -p /var/www/acme
+sudo certbot certonly --non-interactive --agree-tos --register-unsafely-without-email \
+  --preferred-profile shortlived --webroot -w /var/www/acme \
+  --ip-address <服务器IP> --cert-name q-avatar
+```
+
+**自动续期**：`certbot-renew.timer` 每天 03:17 和 15:17 左右运行一次 `certbot renew`。证书用过一半（约 3 天）才真正续期，续期成功后自动重载 nginx。每次运行后 `cert-check.sh` 检查剩余时间，不到 48 小时会在日志里写告警。
+
+```bash
+sudo install -m 755 cert-check.sh /usr/local/bin/q-avatar-cert-check
+sudo cp certbot-renew.service certbot-renew.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now certbot-renew.timer
+```
+
+常用检查：
+
+```bash
+systemctl list-timers certbot-renew.timer      # 下次续期时间
+sudo certbot renew --dry-run                   # 演练一次续期（走测试环境，不替换证书）
+sudo journalctl -u certbot-renew -n 30          # 最近的续期记录和剩余时间
+grep '\[cert\]' /opt/q-avatar/logs/image-api.log  # 证书告警
+```
+
+**如果证书过期了**：网站会打不开（浏览器提示证书无效）。先看 `sudo journalctl -u certbot-renew -n 50` 找原因（常见：80 端口被安全组关了、nginx 配置改坏了验证路径），修好后手动执行 `sudo systemctl start certbot-renew.service`。
+
 ## 以后绑定域名
 
-大陆服务器用域名访问前，要先在腾讯云做 ICP 备案。备案通过后把域名解析到这台服务器，在 nginx 配置里加 `server_name`，再用 certbot 申请 HTTPS 证书。
+大陆服务器用域名访问前，要先在腾讯云做 ICP 备案。备案通过后：把域名解析到这台服务器；在 nginx 配置里加 `server_name`；用 `certbot certonly ... -d 域名` 申请域名证书（默认 90 天有效，比 IP 证书省心）；网站主地址换成域名。

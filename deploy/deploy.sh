@@ -86,7 +86,7 @@ echo "已重启"
 step "6/6 检查"
 sleep 3
 ssh_ "systemctl is-active --quiet q-avatar" || { ssh_ "sudo journalctl -u q-avatar -n 20 --no-pager -o cat"; fail "服务没有起来，看上面的日志"; }
-config=$(ssh_ "curl -s -m 10 http://127.0.0.1/api/config")
+config=$(ssh_ "curl -s -m 10 -k https://127.0.0.1/api/config")
 echo "接口：$config"
 case "$config" in *'"enabled"'*) ;; *) fail "/api/config 没有正常返回";; esac
 ssh_ "printf 'version=%s\ncommit=%s\ndeployed_at=%s\n' '$VERSION' '$COMMIT' \"\$(date '+%F %T')\" | sudo tee $APP/DEPLOYED >/dev/null"

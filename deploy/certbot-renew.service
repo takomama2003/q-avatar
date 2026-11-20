@@ -1,0 +1,12 @@
+[Unit]
+Description=Renew Let's Encrypt certificates (certbot in /opt/certbot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 证书用过一半（IP 证书约 3 天）才真正续期，其余时候 certbot 什么都不做。
+# 续期成功后重载 nginx，让新证书生效。
+ExecStart=/opt/certbot/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"
+# 每次运行后检查证书剩余天数：不到 2 天写一条告警，后端日志和 journalctl 里都能看到
+ExecStartPost=/usr/local/bin/q-avatar-cert-check
