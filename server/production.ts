@@ -53,6 +53,6 @@ const server = http.createServer((req, res) => {
 server.requestTimeout = 6 * 60 * 1000
 server.listen(port, '127.0.0.1', () => {
   log(describeSetup(setup))
-  if (policy) log(`[production] 访问控制已开启：每天最多 ${policy.dailyImages} 张，每个 IP 每小时最多 ${policy.ipHourly} 次，今天还剩 ${access?.remainingToday()} 张。`)
+  if (policy) log(`[production] 访问控制已开启：每天最多 ${policy.dailyImages} 张，今天还剩 ${access?.remainingToday()} 张。`)
   log(`[production] 后端已启动：http://127.0.0.1:${port}/api`)
 })

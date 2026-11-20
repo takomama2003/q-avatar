@@ -6,3 +6,4 @@ dist/
 .dev-agent/
 logs/
 data/
+deploy.local

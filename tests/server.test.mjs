@@ -549,11 +549,12 @@ describe('公网部署的访问控制', () => {
 
   test('读取配置：没有口令不启用；口令太短或数字不合法时报错', () => {
     assert.equal(readAccessPolicy({}), null)
-    assert.deepEqual(policy(), { code: CODE, dailyImages: 20, ipHourly: 6, timeZone: 'Asia/Shanghai' })
-    assert.equal(policy({ DAILY_IMAGE_LIMIT: '5', IP_HOURLY_LIMIT: '2' }).dailyImages, 5)
+    assert.deepEqual(policy(), { code: CODE, dailyImages: 20, timeZone: 'Asia/Shanghai' })
+    assert.equal(policy({ DAILY_IMAGE_LIMIT: '5' }).dailyImages, 5)
     assert.throws(() => readAccessPolicy({ ACCESS_CODE: '12345' }), /6 个字符/)
     assert.throws(() => policy({ DAILY_IMAGE_LIMIT: '0' }), /DAILY_IMAGE_LIMIT/)
-    assert.throws(() => policy({ IP_HOURLY_LIMIT: 'abc' }), /IP_HOURLY_LIMIT/)
+    // 旧配置里的 IP_HOURLY_LIMIT 已不再使用，留着也不会报错
+    assert.deepEqual(policy({ IP_HOURLY_LIMIT: 'abc' }), policy())
   })
   test('只信任本机转发的 X-Real-IP', () => {
     const req = (remoteAddress, ip) => ({ socket: { remoteAddress }, headers: ip ? { 'x-real-ip': ip } : {} })
@@ -586,28 +587,27 @@ describe('公网部署的访问控制', () => {
     } finally { api.server.close(); upstream.server.close() }
   })
 
-  test('每天总张数和每个 IP 每小时次数用完后拒绝，不调用模型', async () => {
+  test('同一 IP 连续生成不按时间段限制；每天总张数用完后拒绝，不调用模型', async () => {
     const upstream = await fakeUpstream()
     upstream.reply = ok()
     let clock = Date.parse('2026-11-17T10:00:00+08:00')
-    const access = createAccessGuard(policy({ DAILY_IMAGE_LIMIT: '3', IP_HOURLY_LIMIT: '2' }), { now: () => clock })
+    const access = createAccessGuard(policy({ DAILY_IMAGE_LIMIT: '12' }), { now: () => clock })
     const api = await apiServer({ OPENAI_API_KEY: KEY, OPENAI_BASE_URL: `${upstream.url}/v1` }, { access })
     const send = (count, ip = '203.0.113.7') => post(api.url, photoForm({ count }), { 'x-access-code': CODE, 'x-real-ip': ip })
     try {
+      // 同一个 IP 一分钟内连发 10 次，都放行
+      for (let i = 0; i < 10; i++) assert.equal((await send(1)).status, 200, `第 ${i + 1} 次`)
+      const tooMany = await send(4)
+      assert.equal(tooMany.status, 429)
+      assert.match((await tooMany.json()).error, /只剩 2 张/)
       assert.equal((await send(2)).status, 200)
-      assert.equal((await send(1)).status, 200)
-      const hourly = await send(1)
-      assert.equal(hourly.status, 429)
-      assert.match((await hourly.json()).error, /每小时最多生成 2 次/)
       const daily = await send(1, '198.51.100.9')
       assert.equal(daily.status, 429)
       assert.match((await daily.json()).error, /今天的生成次数已经用完/)
-      assert.equal(upstream.requests.length, 3)
+      assert.equal(upstream.requests.length, 12)
+      // 第二天额度恢复
       clock += 24 * 60 * 60 * 1000
       assert.equal((await send(1)).status, 200)
-      const tooMany = await send(4, '198.51.100.9')
-      assert.equal(tooMany.status, 429)
-      assert.match((await tooMany.json()).error, /只剩 2 张/)
     } finally { api.server.close(); upstream.server.close() }
   })
 
@@ -622,10 +622,9 @@ describe('公网部署的访问控制', () => {
   test('当天已用张数写入文件，重启后仍然计数', async () => {
     const dir = await tmp()
     const now = () => Date.parse('2026-11-17T10:00:00+08:00')
-    const req = { socket: { remoteAddress: '127.0.0.1' }, headers: {} }
     try {
       const first = guardIn(dir, { DAILY_IMAGE_LIMIT: '5' }, now)
-      assert.ok('reservation' in first.reserve(req, { kind: 'owner' }, 3))
+      assert.ok('reservation' in first.reserve({ kind: 'owner' }, 3))
       assert.equal(guardIn(dir, { DAILY_IMAGE_LIMIT: '5' }, now).remainingToday(), 2)
     } finally { await rm(dir, { recursive: true, force: true }) }
   })

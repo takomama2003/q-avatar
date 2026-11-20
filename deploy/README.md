@@ -15,7 +15,6 @@
 ```ini
 ACCESS_CODE=...          # 主口令（站长自己用），至少 6 个字符，不受个人额度限制；没有它后端拒绝启动
 DAILY_IMAGE_LIMIT=20     # 每天最多生成多少张（所有人合计，北京时间零点重置）
-IP_HOURLY_LIMIT=6        # 每个 IP 每小时最多发起几次生成
 PORT=8787
 ```
 
@@ -77,7 +76,32 @@ sudo -u qavatar node server/codes.ts disable 小王           # 停用；enable 
 
 6. 打开 `http://<服务器IP>` 检查：不填口令只能用演示模式，填入口令后能真实生成。
 
-## 更新代码
+## 一键部署
+
+在项目根目录（Git Bash）：
+
+```bash
+bash deploy/deploy.sh
+```
+
+服务器地址写在项目根目录的 `deploy.local`（已被 git 忽略，不会公开）：
+
+```bash
+QA_SERVER=ubuntu@<服务器IP>
+```
+
+脚本按顺序执行，任何一步失败就停下，线上保持原样：
+
+1. 检查本地没有未提交的改动：线上必须对应一个确定的 git 版本；
+2. 跑后端测试、打包网页；
+3. 把服务器上的代码和上次部署的版本逐个比对；有人直接在服务器上改过，就停下提示，确认可以覆盖时加 `--force`；
+4. 上传；
+5. 安装依赖、替换网页、重启服务；
+6. 检查服务和 `/api/config`，把版本号和提交写进服务器上的 `/opt/q-avatar/DEPLOYED`。
+
+退回上一个版本：`git checkout v0.1.0`，再执行一次 `bash deploy/deploy.sh --force`，最后 `git checkout main` 回来。版本说明见 [CHANGELOG.md](../CHANGELOG.md)。
+
+## 手动更新代码
 
 在本机项目目录（Git Bash）：
 

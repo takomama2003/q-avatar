@@ -178,7 +178,7 @@ async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready,
   // 输入都合格后才占用额度：传错参数不算次数。
   let reservation: Reservation | undefined
   if (gate) {
-    const reserved = gate.access.reserve(req, gate.holder, options.count)
+    const reserved = gate.access.reserve(gate.holder, options.count)
     if ('denied' in reserved) {
       log(`[image-api] 拒绝 ${clientIp(req)}（${holderLabel(gate.holder)}）：${reserved.denied.error}`)
       return sendJson(req, res, reserved.denied.status, { error: reserved.denied.error })

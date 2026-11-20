@@ -4,9 +4,9 @@ import { dirname } from 'node:path'
 import type { IncomingMessage } from 'node:http'
 
 // 公网部署时的访问控制：主口令（ACCESS_CODE）或邀请码才能真实生成。
-// 限制：全站每天总张数、每个 IP 每小时次数、每个邀请码的总额度。本地开发不创建它，行为和以前一样。
+// 限制：全站每天总张数、每个邀请码的总额度。不按时间段限制次数。本地开发不创建它，行为和以前一样。
 type Env = Record<string, string | undefined>
-export type AccessPolicy = { code: string; dailyImages: number; ipHourly: number; timeZone: string }
+export type AccessPolicy = { code: string; dailyImages: number; timeZone: string }
 export type Denied = { status: number; error: string }
 // 这次请求是谁：主口令，或者某个邀请码（用名字标识，日志里只写名字）
 export type Holder = { kind: 'owner' } | { kind: 'invite'; name: string; hash: string }
@@ -38,7 +38,6 @@ export function readAccessPolicy(env: Env): AccessPolicy | null {
   return {
     code,
     dailyImages: positiveInt(env.DAILY_IMAGE_LIMIT, 20, 'DAILY_IMAGE_LIMIT'),
-    ipHourly: positiveInt(env.IP_HOURLY_LIMIT, 6, 'IP_HOURLY_LIMIT'),
     timeZone: env.ACCESS_TIME_ZONE?.trim() || 'Asia/Shanghai',
   }
 }
@@ -80,7 +79,6 @@ export function readJson<T>(file: string | undefined): T | null {
 export function createAccessGuard(policy: AccessPolicy, options: { usageFile?: string; codesFile?: string; codeUsageFile?: string; now?: () => number } = {}) {
   const now = options.now ?? Date.now
   const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: policy.timeZone }).format(now())
-  const requests = new Map<string, number[]>()
   const wrong = new Map<string, number[]>()
   const loadedDaily = readJson<DailyUsage>(options.usageFile)
   let daily: DailyUsage = loadedDaily && typeof loadedDaily.date === 'string' && Number.isInteger(loadedDaily.images) ? loadedDaily : { date: today(), images: 0 }
@@ -138,10 +136,7 @@ export function createAccessGuard(policy: AccessPolicy, options: { usageFile?: s
       return { denied: { status: 401, error: '邀请码不正确，请重新输入。' } }
     },
     // 选项校验通过、准备调用模型之前占用额度。按请求的张数计，结束后再按结果退回明确没扣费的张数。
-    reserve(req: IncomingMessage, holder: Holder, count: number): { reservation: Reservation } | { denied: Denied } {
-      const ip = clientIp(req)
-      const list = recent(requests, ip)
-      if (list.length >= policy.ipHourly) return { denied: { status: 429, error: `每小时最多生成 ${policy.ipHourly} 次，请稍后再试。` } }
+    reserve(holder: Holder, count: number): { reservation: Reservation } | { denied: Denied } {
       const own = inviteLeft(holder)
       if (own !== undefined && own <= 0) return { denied: { status: 429, error: '你的邀请码额度用完了，请联系发给你邀请码的人加额度。' } }
       if (own !== undefined && count > own) return { denied: { status: 429, error: `你的邀请码只剩 ${own} 张，请减少张数后再试。` } }
@@ -149,7 +144,6 @@ export function createAccessGuard(policy: AccessPolicy, options: { usageFile?: s
       const left = policy.dailyImages - day.images
       if (left <= 0) return { denied: { status: 429, error: '今天的生成次数已经用完了，明天再来吧。' } }
       if (count > left) return { denied: { status: 429, error: `今天只剩 ${left} 张的额度，请减少张数后再试。` } }
-      list.push(now())
       day.images += count
       saveDaily()
       if (holder.kind === 'invite') {
