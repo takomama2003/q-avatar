@@ -43,12 +43,17 @@ if [ -z "$LAST" ]; then
 elif ! git cat-file -e "$LAST^{commit}" 2>/dev/null; then
   fail "服务器记录的上次部署版本 $LAST 在本地找不到。先 git fetch，或确认是不是从别的电脑部署过。"
 else
+  # 一次 ssh 取回服务器上所有文件的指纹，在本地逐个比对。
+  # （不要在 while read 循环里调 ssh：ssh 会读走循环剩下的输入，只比对第一个文件。）
+  mapfile -t files < <(git ls-tree -r --name-only "$LAST" -- "${FILES[@]}")
+  mapfile -t remote < <(ssh_ "cd $APP && for f in ${files[*]}; do if [ -f \"\$f\" ]; then tr -d '\r' < \"\$f\" | sha256sum | cut -c1-64; else echo missing; fi; done" </dev/null)
+  [ ${#remote[@]} -eq ${#files[@]} ] || fail "取服务器文件指纹失败（期望 ${#files[@]} 个，拿到 ${#remote[@]} 个）"
   changed=()
-  while IFS= read -r file; do
-    want=$(git show "$LAST:$file" | tr -d '\r' | sha256sum | cut -c1-64)
-    have=$(ssh_ "tr -d '\r' < '$APP/$file' 2>/dev/null | sha256sum | cut -c1-64")
-    [ "$want" = "$have" ] || changed+=("$file")
-  done < <(git ls-tree -r --name-only "$LAST" -- "${FILES[@]}")
+  for i in "${!files[@]}"; do
+    want=$(git show "$LAST:${files[$i]}" | tr -d '\r' | sha256sum | cut -c1-64)
+    [ "$want" = "${remote[$i]}" ] || changed+=("${files[$i]}")
+  done
+  echo "比对了 ${#files[@]} 个文件"
   if [ ${#changed[@]} -gt 0 ]; then
     printf '服务器上这些文件和上次部署的 %s 不一样：\n' "$LAST"; printf '  %s\n' "${changed[@]}"
     [ $FORCE = 1 ] || fail "有人直接改过服务器上的代码。先把改动拿回本地合并；确认可以覆盖时加 --force。"
