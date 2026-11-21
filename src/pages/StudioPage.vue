@@ -223,8 +223,8 @@ onBeforeUnmount(() => { window.removeEventListener('dragover', blockStrayDrop); 
           </template>
           <template v-else>
             <div class="field-heading"><h3>{{ currentUser?.username }} 的额度</h3><span class="field-meta">剩余 <strong class="credits">{{ currentUser?.credits }}</strong> 张</span></div>
-            <p class="field-hint">{{ currentUser?.credits ? '每生成一张扣 1 张，上游明确拒绝的会退回。' : '额度用完了，去“我的账户”输入兑换码就能继续生成。' }}</p>
-            <div class="access-actions"><RouterLink class="btn btn-secondary btn-small" to="/account">{{ currentUser?.credits ? '我的账户' : '去兑换' }}</RouterLink></div>
+            <p class="field-hint">{{ currentUser?.credits ? '每生成一张扣 1 张，上游明确拒绝的会退回。' : '额度用完了。去“我的账户”输入兑换码，或者向 Tim 申请额度。' }}</p>
+            <div class="access-actions"><RouterLink class="btn btn-secondary btn-small" to="/account">{{ currentUser?.credits ? '我的账户' : '兑换或申请额度' }}</RouterLink></div>
           </template>
         </div>
 

@@ -442,6 +442,127 @@ describe('管理后台', () => {
   })
 })
 
+describe('改密码', () => {
+  test('用户自己改：要先输对旧密码；改完其他设备下线，当前设备继续登录', async () => {
+    const env = await setup()
+    try {
+      const phone = env.client('198.51.100.1'); await phone.register('ursula01', 'old-password')
+      const laptop = env.client('198.51.100.1'); await laptop.login('ursula01', 'old-password')
+      const change = body => phone.call('/account/password', { method: 'POST', body })
+      assert.match((await change({ currentPassword: 'wrong-old-pw', newPassword: 'new-password' })).body.error, /现在的密码不对/)
+      assert.match((await change({ currentPassword: 'old-password', newPassword: 'short' })).body.error, /新密码至少 8 位/)
+      assert.match((await change({ currentPassword: 'old-password', newPassword: 'old-password' })).body.error, /一样/)
+      assert.equal((await change({ currentPassword: 'old-password', newPassword: 'new-password' })).status, 200)
+      assert.equal((await phone.call('/auth/me')).status, 200, '改密码的这台设备继续登录')
+      assert.equal((await laptop.call('/auth/me')).status, 401, '其他设备下线')
+      assert.equal((await env.client('198.51.100.2').login('ursula01', 'old-password')).status, 401)
+      assert.equal((await env.client('198.51.100.3').login('ursula01', 'new-password')).status, 200)
+      assert.ok(!env.logs.join('\n').includes('new-password'), '日志里没有新密码')
+    } finally { env.close() }
+  })
+
+  test('反复猜旧密码会被锁定', async () => {
+    const env = await setup()
+    try {
+      const c = env.client(); await c.register('victor01', 'old-password')
+      for (let i = 0; i < 8; i++) await c.call('/account/password', { method: 'POST', body: { currentPassword: `guess-${i}-xx`, newPassword: 'new-password' } })
+      assert.equal((await c.call('/account/password', { method: 'POST', body: { currentPassword: 'old-password', newPassword: 'new-password' } })).status, 429)
+    } finally { env.close() }
+  })
+
+  test('管理员设置别人和自己的密码', async () => {
+    const env = await setup()
+    try {
+      await createUser(env.db, 'tim_admin', 'admin-password-1', 'admin')
+      const admin = env.client('198.51.100.200'); await admin.login('tim_admin', 'admin-password-1')
+      const user = env.client('198.51.100.5'); await user.register('walter01')
+      const uid = env.db.prepare("SELECT id FROM users WHERE username = 'walter01'").get().id
+      const aid = env.db.prepare("SELECT id FROM users WHERE username = 'tim_admin'").get().id
+      const set = (userId, password) => admin.call('/admin/users/set-password', { method: 'POST', body: { userId, password } })
+      assert.equal((await set(uid, 'short')).status, 400)
+      assert.equal((await set(uid, 'walter-new-pw')).status, 200)
+      assert.equal((await user.call('/auth/me')).status, 401, '对方所有设备下线')
+      assert.equal((await env.client('198.51.100.6').login('walter01', 'walter-new-pw')).status, 200)
+      assert.equal((await set(aid, 'admin-password-2')).status, 200)
+      assert.equal((await admin.call('/auth/me')).status, 200, '改自己的密码，当前设备不下线')
+      assert.equal((await env.client('198.51.100.7').login('tim_admin', 'admin-password-2')).status, 200)
+      assert.equal((await user.call('/admin/users/set-password', { method: 'POST', body: { userId: aid, password: 'hacked-pass' } })).status, 401)
+      assert.deepEqual(env.db.prepare('SELECT action, target FROM admin_log ORDER BY id').all().map(r => `${r.action} ${r.target}`), ['设置密码 walter01', '设置密码 tim_admin'])
+    } finally { env.close() }
+  })
+})
+
+describe('额度申请', () => {
+  test('用户申请、管理员批准（可以改张数）；同时只能有一个待处理；处理完能再申请', async () => {
+    const env = await setup()
+    try {
+      await createUser(env.db, 'tim_admin', 'admin-password-1', 'admin')
+      const admin = env.client('198.51.100.200'); await admin.login('tim_admin', 'admin-password-1')
+      const c = env.client(); await c.register('xavier01')
+      const ask = body => c.call('/account/request', { method: 'POST', body })
+      assert.equal((await ask({ amount: 0 })).status, 400)
+      assert.equal((await ask({ amount: 5000 })).status, 400)
+      assert.equal((await ask({ amount: 10, reason: 'x'.repeat(201) })).status, 400)
+      const first = await ask({ amount: 30, reason: '想给家里人都做一个' })
+      assert.equal(first.status, 200)
+      assert.match((await ask({ amount: 5 })).body.error, /已经有一个申请/)
+      const pending = (await admin.call('/admin/requests')).body.requests
+      assert.equal(pending.length, 1)
+      assert.equal(pending[0].username, 'xavier01')
+      assert.equal(pending[0].reason, '想给家里人都做一个')
+      const approved = await admin.call('/admin/requests/approve', { method: 'POST', body: { requestId: first.body.request.id, granted: 20, reply: '先给 20 张' } })
+      assert.equal(approved.status, 200)
+      assert.equal(approved.body.balance, 20)
+      assert.match((await admin.call('/admin/requests/approve', { method: 'POST', body: { requestId: first.body.request.id } })).body.error, /已经处理过/)
+      const mine = (await c.call('/account/history')).body
+      assert.equal(mine.balance, 20)
+      assert.deepEqual({ ...mine.requests[0], created_at: 0, decided_at: 0 }, { id: first.body.request.id, amount: 30, reason: '想给家里人都做一个', status: 'approved', granted: 20, reply: '先给 20 张', created_at: 0, decided_at: 0 })
+      assert.match(mine.ledger[0].note, /批准额度申请/)
+      // 处理完可以再申请；拒绝时用户能看到原因
+      const second = await ask({ amount: 100 })
+      assert.equal(second.status, 200)
+      await admin.call('/admin/requests/reject', { method: 'POST', body: { requestId: second.body.request.id, reply: '太多了' } })
+      const after = (await c.call('/account/history')).body
+      assert.equal(after.balance, 20)
+      assert.equal(after.requests[0].status, 'rejected')
+      assert.equal(after.requests[0].reply, '太多了')
+      assert.equal((await admin.call('/admin/requests')).body.requests.length, 0, '默认只列待处理的')
+      assert.equal((await admin.call('/admin/requests?status=all')).body.requests.length, 2)
+      assert.deepEqual(env.db.prepare('SELECT action FROM admin_log ORDER BY id').all().map(r => r.action), ['批准额度申请', '拒绝额度申请'])
+    } finally { env.close() }
+  })
+
+  test('用户可以撤回待处理的申请；普通用户不能批准申请', async () => {
+    const env = await setup()
+    try {
+      const c = env.client(); await c.register('yvonne01')
+      const req = await c.call('/account/request', { method: 'POST', body: { amount: 10 } })
+      assert.equal((await c.call('/admin/requests/approve', { method: 'POST', body: { requestId: req.body.request.id } })).status, 403)
+      assert.equal((await c.call('/account/request/cancel', { method: 'POST', body: {} })).status, 200)
+      assert.equal((await c.call('/account/request/cancel', { method: 'POST', body: {} })).status, 404)
+      assert.equal((await c.call('/account/history')).body.requests[0].status, 'cancelled')
+      assert.equal((await c.call('/account/request', { method: 'POST', body: { amount: 10 } })).status, 200, '撤回后可以重新申请')
+      assert.equal(balance(env.db, 'yvonne01'), 0)
+    } finally { env.close() }
+  })
+
+  test('数据库从 v0.2 第一版升级时自动加上申请表', async () => {
+    const { DatabaseSync } = await import('node:sqlite')
+    const dir = await mkdtemp(join(tmpdir(), 'qa-upgrade-'))
+    try {
+      const file = join(dir, 'app.db')
+      // 模拟只有第 1 版表结构的旧数据库
+      const old = new DatabaseSync(file)
+      old.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, username_key TEXT UNIQUE, password_hash TEXT, role TEXT DEFAULT 'user', status TEXT DEFAULT 'active', created_at TEXT, last_login_at TEXT); PRAGMA user_version = 1;")
+      old.close()
+      const db = openDb(file)
+      assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2)
+      assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'credit_requests'").get())
+      db.close()
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+})
+
 describe('从 v0.1 迁移', () => {
   test('旧邀请码变成兑换码：原码可直接兑换剩余额度；停用和用完的跳过；重复运行不重复创建', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'qa-migrate-'))

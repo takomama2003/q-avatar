@@ -61,7 +61,7 @@ export function createCredits(db: Db, options: { dailyLimit?: number; now?: () =
     reserve(userId: number, count: number, meta: { style: string; composition: string }): { reservation: Reservation } | Denied {
       return transaction(db, () => {
         const balance = balanceOf(db, userId)
-        if (balance <= 0) return { status: 402, error: '你的额度用完了。去“我的账户”输入兑换码就能继续生成。' }
+        if (balance <= 0) return { status: 402, error: '你的额度用完了。去“我的账户”输入兑换码，或者向 Tim 申请额度。' }
         if (count > balance) return { status: 402, error: `你只剩 ${balance} 张额度，请减少张数后再试。` }
         const left = dailyLimit - usedToday()
         if (left <= 0) return { status: 429, error: '今天全站的生成次数已经用完了，明天再来吧。' }
@@ -90,6 +90,48 @@ export function createCredits(db: Db, options: { dailyLimit?: number; now?: () =
   }
 }
 export type Credits = ReturnType<typeof createCredits>
+
+// 额度申请：用户提交，管理员批准（直接加额度）或拒绝。每个人同时只能有一个待处理的申请。
+export const REQUEST_MAX = 1000
+export type CreditRequest = { id: number; amount: number; reason: string; status: string; granted: number | null; reply: string; created_at: string; decided_at: string | null }
+
+export function submitRequest(db: Db, userId: number, body: { amount?: unknown; reason?: unknown }, now = Date.now()): CreditRequest | Denied {
+  const amount = Number(body.amount)
+  if (!Number.isInteger(amount) || amount < 1 || amount > REQUEST_MAX) return { status: 400, error: `申请的张数要在 1 到 ${REQUEST_MAX} 之间。` }
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+  if (Array.from(reason).length > 200) return { status: 400, error: '用途说明最多 200 个字。' }
+  try {
+    const id = Number(db.prepare('INSERT INTO credit_requests (user_id, amount, reason, created_at) VALUES (?, ?, ?, ?)').run(userId, amount, reason, nowIso(now)).lastInsertRowid)
+    return db.prepare('SELECT id, amount, reason, status, granted, reply, created_at, decided_at FROM credit_requests WHERE id = ?').get(id) as CreditRequest
+  } catch (error) {
+    if (/UNIQUE/i.test((error as Error).message)) return { status: 409, error: '你已经有一个申请在等 Tim 处理了，处理完才能再申请。' }
+    throw error
+  }
+}
+
+export function cancelRequest(db: Db, userId: number, now = Date.now()) {
+  return Number(db.prepare("UPDATE credit_requests SET status = 'cancelled', decided_at = ? WHERE user_id = ? AND status = 'pending'").run(nowIso(now), userId).changes) > 0
+}
+
+// 批准：在同一个事务里改状态并加额度，同一个申请不会被批准两次
+export function decideRequest(db: Db, requestId: number, decision: { approve: boolean; granted?: number; reply?: string; adminId: number }, now = Date.now()) {
+  return transaction(db, () => {
+    const row = db.prepare('SELECT id, user_id, amount, status FROM credit_requests WHERE id = ?').get(requestId) as { id: number; user_id: number; amount: number; status: string } | undefined
+    if (!row) throw new Error('没有这个申请。')
+    if (row.status !== 'pending') throw new Error('这个申请已经处理过了。')
+    const reply = (decision.reply ?? '').trim().slice(0, 200)
+    const at = nowIso(now)
+    if (!decision.approve) {
+      db.prepare("UPDATE credit_requests SET status = 'rejected', reply = ?, decided_at = ?, decided_by = ? WHERE id = ?").run(reply, at, decision.adminId, row.id)
+      return { userId: row.user_id, granted: 0, balance: balanceOf(db, row.user_id) }
+    }
+    const granted = decision.granted ?? row.amount
+    if (!Number.isInteger(granted) || granted < 1 || granted > 100_000) throw new Error('批准的张数必须是 1 到 100000 之间的整数。')
+    db.prepare("UPDATE credit_requests SET status = 'approved', granted = ?, reply = ?, decided_at = ?, decided_by = ? WHERE id = ?").run(granted, reply, at, decision.adminId, row.id)
+    db.prepare("INSERT INTO credit_ledger (user_id, delta, reason, note, created_at) VALUES (?, ?, 'admin', ?, ?)").run(row.user_id, granted, `批准额度申请 #${row.id}`, at)
+    return { userId: row.user_id, granted, balance: balanceOf(db, row.user_id) }
+  })
+}
 
 // 管理员和命令行用：建兑换码（返回原文，只显示这一次）、调整额度
 export function createVoucher(db: Db, options: { credits: number; maxUses?: number; note?: string; createdBy?: number; code?: string; codeHash?: string; now?: number }) {

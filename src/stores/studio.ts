@@ -105,7 +105,7 @@ async function generate() {
   // 登录了但额度不够：不发请求，直接提示去兑换
   if (model && accounts.value && currentUser.value && currentUser.value.credits < count) {
     accountProblem.value = 'no_credits'
-    error.value = currentUser.value.credits ? `你只剩 ${currentUser.value.credits} 张额度，请减少张数，或去“我的账户”兑换。` : '你的额度用完了。去“我的账户”输入兑换码就能继续生成。'
+    error.value = currentUser.value.credits ? `你只剩 ${currentUser.value.credits} 张额度，请减少张数，或去“我的账户”兑换、申请额度。` : '你的额度用完了。去“我的账户”输入兑换码，或者向 Tim 申请额度。'
     return false
   }
   busy.value = true; error.value = ''; unseen.value = false; accountProblem.value = ''

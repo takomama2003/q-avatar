@@ -78,6 +78,24 @@ const MIGRATIONS: string[] = [
     created_at TEXT NOT NULL
   );
   `,
+  // 2：v0.2.0 额度申请。用户在“我的账户”提交，管理员在后台批准（直接加额度）或拒绝。
+  `
+  CREATE TABLE credit_requests (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount INTEGER NOT NULL CHECK (amount > 0),     -- 用户想要的张数
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+    granted INTEGER,                                  -- 批准时实际给的张数（可以和申请的不一样）
+    reply TEXT NOT NULL DEFAULT '',                   -- 管理员的回复，用户能看到
+    created_at TEXT NOT NULL,
+    decided_at TEXT,
+    decided_by INTEGER REFERENCES users(id)
+  );
+  CREATE INDEX credit_requests_status ON credit_requests(status, created_at);
+  -- 每个人同时只能有一个待处理的申请
+  CREATE UNIQUE INDEX credit_requests_one_pending ON credit_requests(user_id) WHERE status = 'pending';
+  `,
 ]
 
 export type Db = DatabaseSync

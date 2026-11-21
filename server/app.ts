@@ -1,8 +1,8 @@
 // v0.2 后端的组装：账号接口 /api/auth/*、我的账户 /api/account/*、管理后台 /api/admin/*、生成 /api/generate。
 // production.ts 只负责读配置、开端口；这里把数据库、账号、额度和生成接到一起，方便测试直接用。
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { createAuth, clientIp, setPassword, temporaryPassword, type Auth, type User } from './auth.ts'
-import { adjustCredits, balanceOf, createCredits, createVoucher, type Credits, type Reservation } from './credits.ts'
+import { checkPassword, createAuth, clientIp, setPassword, temporaryPassword, type Auth, type User } from './auth.ts'
+import { adjustCredits, balanceOf, cancelRequest, createCredits, createVoucher, decideRequest, submitRequest, type Credits, type Reservation } from './credits.ts'
 import { nowIso, type Db } from './db.ts'
 import { createImageApi, isLocalRequest, type Billing } from './image-api.ts'
 
@@ -122,7 +122,26 @@ export function createApp(options: AppOptions) {
     if (path === '/account/history' && req.method === 'GET') {
       const rows = db.prepare('SELECT created_at, style, composition, requested, succeeded, failed, refunded, status FROM generations WHERE user_id = ? ORDER BY id DESC LIMIT 20').all(user.id)
       const ledger = db.prepare('SELECT delta, reason, note, created_at FROM credit_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 20').all(user.id)
-      return sendJson(res, 200, { balance: balanceOf(db, user.id), generations: rows, ledger })
+      const requests = db.prepare('SELECT id, amount, reason, status, granted, reply, created_at, decided_at FROM credit_requests WHERE user_id = ? ORDER BY id DESC LIMIT 5').all(user.id)
+      return sendJson(res, 200, { balance: balanceOf(db, user.id), generations: rows, ledger, requests })
+    }
+    if (req.method !== 'POST') return sendJson(res, 405, { error: '只支持 POST。' })
+    if (path === '/account/request' || path === '/account/request/cancel' || path === '/account/password') {
+      const body = await readJson(req)
+      if (!body) return sendJson(res, 400, { error: '请求格式不对，请刷新页面后重试。' })
+      if (path === '/account/request') {
+        const result = submitRequest(db, user.id, body, now())
+        if ('error' in result) return sendJson(res, result.status, { error: result.error })
+        log(`[account] ${user.username} 申请 ${result.amount} 张额度（#${result.id}）`)
+        return sendJson(res, 200, { request: result })
+      }
+      if (path === '/account/request/cancel') {
+        return cancelRequest(db, user.id, now()) ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: '没有待处理的申请。' })
+      }
+      const result = await auth.changePassword(req, res, user, body)
+      if ('error' in result) return sendJson(res, result.status, { error: result.error })
+      log(`[account] ${user.username} 修改了密码`)
+      return sendJson(res, 200, { ok: true })
     }
     return sendJson(res, 404, { error: '接口不存在。' })
   }
@@ -167,6 +186,14 @@ export function createApp(options: AppOptions) {
       const total = Number((db.prepare('SELECT COUNT(*) AS n FROM generations WHERE (? = 0 OR user_id = ?)').get(userId, userId) as { n: number }).n)
       return sendJson(res, 200, { generations: rows, total })
     }
+    if (get && path === '/admin/requests') {
+      const status = url.searchParams.get('status') === 'all' ? 'all' : 'pending'
+      const rows = db.prepare(`SELECT r.id, r.user_id, u.username, r.amount, r.reason, r.status, r.granted, r.reply, r.created_at, r.decided_at,
+        COALESCE((SELECT SUM(delta) FROM credit_ledger WHERE user_id = r.user_id), 0) AS balance
+        FROM credit_requests r JOIN users u ON u.id = r.user_id WHERE (? = 'all' OR r.status = 'pending')
+        ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.id DESC LIMIT 200`).all(status)
+      return sendJson(res, 200, { requests: rows })
+    }
 
     if (req.method !== 'POST') return sendJson(res, 405, { error: '只支持 POST。' })
     const body = await readJson(req)
@@ -193,6 +220,16 @@ export function createApp(options: AppOptions) {
         audit(admin, status === 'disabled' ? '停用兑换码' : '恢复兑换码', `#${id}`)
         return sendJson(res, 200, { ok: true })
       }
+      if (path === '/admin/requests/approve' || path === '/admin/requests/reject') {
+        const approve = path.endsWith('approve')
+        const result = decideRequest(db, Number(body.requestId), {
+          approve, adminId: admin.id, reply: typeof body.reply === 'string' ? body.reply : '',
+          granted: body.granted === undefined || body.granted === '' ? undefined : Number(body.granted),
+        }, now())
+        const who = (db.prepare('SELECT username FROM users WHERE id = ?').get(result.userId) as { username: string }).username
+        audit(admin, approve ? '批准额度申请' : '拒绝额度申请', who, `#${body.requestId}${approve ? ` · +${result.granted} 张，余额 ${result.balance}` : ''}`)
+        return sendJson(res, 200, result)
+      }
       const user = target()
       if (!user) return sendJson(res, 404, { error: '没有这个用户。' })
       if (path === '/admin/users/credits') {
@@ -214,6 +251,16 @@ export function createApp(options: AppOptions) {
         await setPassword(db, user.id, password)
         audit(admin, '重置密码', user.username)
         return sendJson(res, 200, { password })
+      }
+      // 管理员直接给某个账号设一个指定的密码（包括自己）；对方所有设备下线
+      if (path === '/admin/users/set-password') {
+        const problem = checkPassword(body.password)
+        if (problem) return sendJson(res, 400, { error: problem })
+        await setPassword(db, user.id, body.password as string)
+        // 改的是自己：当前设备换一个新令牌，不用重新登录
+        if (user.id === admin.id) auth.startSessionFor(res, admin.id)
+        audit(admin, '设置密码', user.username)
+        return sendJson(res, 200, { ok: true })
       }
     } catch (error) {
       return sendJson(res, 400, { error: (error as Error).message })

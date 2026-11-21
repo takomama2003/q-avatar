@@ -100,11 +100,15 @@
   .page-head { padding: 28px 0 22px; }
 }
 @media (max-width: 480px) {
+  .account-name { display: none; }
+  .account-chip { padding-right: 8px; }
   .container { padding: 0 14px; }
   .header-inner { height: 64px; }
   .brand-name { font-size: 21px; }
   .header-actions .btn { display: none; }
   .demo-tag { padding: 6px 11px; font-size: 12px; }
+  /* 登录后顶栏放不下：账户头像比“已配置模型”的标签更有用 */
+  .header-actions:has(.account-chip) .demo-tag { display: none; }
   .demo-text { max-width: 130px; }
   .subtitle, .page-head .subtitle { font-size: 14px; }
   .toast { left: 14px; right: 14px; bottom: 14px; max-width: none; }

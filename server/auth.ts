@@ -139,6 +139,8 @@ export function createAuth(db: Db, options: AuthOptions = {}) {
 
   return {
     currentUser,
+    // 管理员改了自己的密码后，当前设备换一个新令牌继续用
+    startSessionFor: (res: ServerResponse, userId: number) => startSession(res, userId),
 
     async register(req: IncomingMessage, res: ServerResponse, body: { username?: unknown; password?: unknown; privacyAccepted?: unknown }): Promise<User | AuthError> {
       const problem = checkUsername(body.username) || checkPassword(body.password)
@@ -189,6 +191,25 @@ export function createAuth(db: Db, options: AuthOptions = {}) {
       db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(nowIso(now()), row.id)
       startSession(res, row.id)
       return { id: row.id, username: row.username, role: row.role, status: row.status }
+    },
+
+    // 用户自己改密码：要先输对旧密码。改完其他设备下线，当前设备换一个新的登录令牌继续用。
+    async changePassword(req: IncomingMessage, res: ServerResponse, user: User, body: { currentPassword?: unknown; newPassword?: unknown }): Promise<{ ok: true } | AuthError> {
+      if (typeof body.currentPassword !== 'string' || !body.currentPassword) return { status: 400, error: '请输入现在的密码。' }
+      const problem = checkPassword(body.newPassword)
+      if (problem) return { status: 400, error: problem.replace('密码', '新密码') }
+      if (body.newPassword === body.currentPassword) return { status: 400, error: '新密码和现在的密码一样，换一个吧。' }
+      // 和登录共用锁定计数：防止有人拿着别人没退出的电脑反复猜旧密码
+      const ip = clientIp(req)
+      const key = `${usernameKey(user.username)}\u0000${ip}`
+      if (accountFails.count(key) >= LOGIN_FAILS_PER_ACCOUNT) return { status: 429, error: '密码输错次数太多，请 15 分钟后再试。' }
+      accountFails.add(key)
+      const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id) as { password_hash: string } | undefined
+      if (!row || !(await verifyPassword(body.currentPassword, row.password_hash))) return { status: 401, error: '现在的密码不对。' }
+      accountFails.clear(key)
+      await setPassword(db, user.id, body.newPassword as string)
+      startSession(res, user.id)
+      return { ok: true }
     },
 
     logout(req: IncomingMessage, res: ServerResponse) {

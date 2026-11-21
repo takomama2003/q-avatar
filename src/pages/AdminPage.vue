@@ -5,19 +5,23 @@ import { COMPOSITIONS, STYLES, nameOf } from '../../shared/options'
 import { api, currentUser, whenUserKnown } from '../services/auth'
 
 // 管理后台：用户、兑换码、用量统计、生成记录。只有管理员能打开；接口那边同样会检查。
-type Tab = 'users' | 'vouchers' | 'stats' | 'generations'
+type Tab = 'requests' | 'users' | 'vouchers' | 'stats' | 'generations'
+type RequestRow = { id: number; user_id: number; username: string; amount: number; reason: string; status: string; granted: number | null; reply: string; created_at: string; decided_at: string | null; balance: number }
 type UserRow = { id: number; username: string; role: string; status: string; created_at: string; last_login_at: string | null; balance: number; generated: number; last_generated_at: string | null }
 type VoucherRow = { id: number; note: string; credits: number; max_uses: number; used_count: number; status: string; created_at: string; redeemed_by: string | null }
 type Stats = { totals: { users: number; succeeded: number; failed: number; outstanding: number }; days: { day: string; requested: number; succeeded: number; failed: number; refunded: number; runs: number; users: number }[]; top: { username: string; succeeded: number }[]; remainingToday: number }
 type GenRow = { id: number; username: string; created_at: string; style: string; composition: string; requested: number; succeeded: number; failed: number; refunded: number; duration_ms: number | null; status: string; error: string }
 
 const router = useRouter()
-const tab = ref<Tab>('users')
+const tab = ref<Tab>('requests')
 const error = ref('')
 const notice = ref('')
 // 新建的兑换码或临时密码：只显示这一次
 const secret = ref<{ title: string; value: string } | null>(null)
 const users = ref<UserRow[]>([])
+const requests = ref<RequestRow[]>([])
+const showAllRequests = ref(false)
+const pendingCount = ref(0)
 const query = ref('')
 const vouchers = ref<VoucherRow[]>([])
 const stats = ref<Stats | null>(null)
@@ -28,7 +32,7 @@ const gensUser = ref(0)
 const newVoucher = ref({ credits: 20, maxUses: 1, note: '' })
 const PAGE = 50
 const tabs: { id: Tab; label: string }[] = [
-  { id: 'users', label: '用户' }, { id: 'vouchers', label: '兑换码' }, { id: 'stats', label: '用量统计' }, { id: 'generations', label: '生成记录' },
+  { id: 'requests', label: '额度申请' }, { id: 'users', label: '用户' }, { id: 'vouchers', label: '兑换码' }, { id: 'stats', label: '用量统计' }, { id: 'generations', label: '生成记录' },
 ]
 const when = (iso: string | null) => iso ? new Date(iso).toLocaleString('zh-CN', { year: '2-digit', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
@@ -37,6 +41,10 @@ async function run<T>(work: () => Promise<T>) {
   error.value = ''
   try { return await work() } catch (reason) { error.value = (reason as Error).message; return undefined }
 }
+const loadRequests = () => run(async () => {
+  requests.value = (await api<{ requests: RequestRow[] }>(`admin/requests${showAllRequests.value ? '?status=all' : ''}`)).requests
+  pendingCount.value = requests.value.filter(r => r.status === 'pending').length
+})
 const loadUsers = () => run(async () => { users.value = (await api<{ users: UserRow[] }>(`admin/users?q=${encodeURIComponent(query.value.trim())}`)).users })
 const loadVouchers = () => run(async () => { vouchers.value = (await api<{ vouchers: VoucherRow[] }>('admin/vouchers')).vouchers })
 const loadStats = () => run(async () => { stats.value = await api<Stats>('admin/stats') })
@@ -44,8 +52,35 @@ const loadGens = () => run(async () => {
   const data = await api<{ generations: GenRow[]; total: number }>(`admin/generations?limit=${PAGE}&offset=${gensOffset.value}${gensUser.value ? `&user=${gensUser.value}` : ''}`)
   gens.value = data.generations; gensTotal.value = data.total
 })
-const loaders: Record<Tab, () => Promise<unknown>> = { users: loadUsers, vouchers: loadVouchers, stats: loadStats, generations: loadGens }
+const loaders: Record<Tab, () => Promise<unknown>> = { requests: loadRequests, users: loadUsers, vouchers: loadVouchers, stats: loadStats, generations: loadGens }
 watch(tab, next => { notice.value = ''; void loaders[next]() })
+
+const REQUEST_STATUS: Record<string, string> = { pending: '待处理', approved: '已批准', rejected: '已拒绝', cancelled: '用户撤回' }
+async function decide(row: RequestRow, approve: boolean) {
+  let granted: number | undefined
+  if (approve) {
+    const raw = window.prompt(`给 ${row.username} 批准多少张？他申请了 ${row.amount} 张，现在有 ${row.balance} 张。`, String(row.amount))
+    if (raw === null) return
+    granted = Number(raw)
+  }
+  const reply = window.prompt(approve ? '给他留句话（选填，他在账户页能看到）' : '拒绝的原因（选填，他在账户页能看到）', '')
+  if (reply === null) return
+  const result = await run(() => api<{ granted: number; balance: number }>(approve ? 'admin/requests/approve' : 'admin/requests/reject', { requestId: row.id, granted, reply }))
+  if (result) {
+    notice.value = approve ? `已批准 ${row.username} ${result.granted} 张，他现在有 ${result.balance} 张。` : `已拒绝 ${row.username} 的申请。`
+    await loadRequests()
+  }
+}
+
+async function setPassword(user: UserRow) {
+  const self = user.username === currentUser.value?.username
+  const password = window.prompt(self ? '输入你的新密码（至少 8 位）。改完其他设备会下线，这台不受影响。' : `给 ${user.username} 设一个新密码（至少 8 位）。他所有设备会下线，要用新密码重新登录。`, '')
+  if (!password) return
+  if (password !== window.prompt('再输一次新密码', '')) { error.value = '两次输入的密码不一样，没有修改。'; return }
+  if (await run(() => api('admin/users/set-password', { userId: user.id, password })) !== undefined) {
+    notice.value = self ? '你的密码已修改。' : `已修改 ${user.username} 的密码，请把新密码告诉他。`
+  }
+}
 
 async function adjust(user: UserRow) {
   const raw = window.prompt(`给 ${user.username} 加多少张？扣减就填负数。当前余额 ${user.balance}。`, '10')
@@ -101,7 +136,7 @@ onMounted(async () => {
   checked.value = true
   if (!currentUser.value) return void router.replace({ name: 'login', query: { redirect: '/admin' } })
   if (!isAdmin.value) return
-  await loadUsers()
+  await loadRequests()
 })
 </script>
 
@@ -121,7 +156,7 @@ onMounted(async () => {
     </div>
     <template v-else>
       <div class="admin-tabs" role="tablist" aria-label="后台分区">
-        <button v-for="t in tabs" :key="t.id" type="button" role="tab" :aria-selected="tab === t.id" @click="tab = t.id">{{ t.label }}</button>
+        <button v-for="t in tabs" :key="t.id" type="button" role="tab" :aria-selected="tab === t.id" @click="tab = t.id">{{ t.label }}<span v-if="t.id === 'requests' && pendingCount" class="tab-badge">{{ pendingCount }}</span></button>
       </div>
 
       <div v-if="secret" class="secret" role="alert">
@@ -133,7 +168,37 @@ onMounted(async () => {
       <p v-if="notice" class="success" role="status">{{ notice }}</p>
       <p v-if="error" :key="error" class="error" role="alert"><span>{{ error }}</span></p>
 
-      <section v-if="tab === 'users'" class="panel">
+      <section v-if="tab === 'requests'" class="panel">
+        <div class="admin-toolbar">
+          <span>{{ showAllRequests ? '全部申请（最近 200 条）' : `待处理 ${pendingCount} 个` }}</span>
+          <span class="grow"></span>
+          <label><input v-model="showAllRequests" type="checkbox" @change="loadRequests"> 显示已处理的</label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>用户</th><th class="num">申请张数</th><th class="num">现有</th><th>用途</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="r in requests" :key="r.id" :class="{ off: r.status !== 'pending' }">
+                <td>{{ when(r.created_at) }}</td>
+                <td>{{ r.username }}</td>
+                <td class="num">{{ r.amount }}</td>
+                <td class="num">{{ r.balance }}</td>
+                <td class="wrap">{{ r.reason || '—' }}</td>
+                <td>{{ REQUEST_STATUS[r.status] ?? r.status }}{{ r.status === 'approved' ? ` ${r.granted} 张` : '' }}<span v-if="r.reply" class="muted"> · {{ r.reply }}</span></td>
+                <td class="actions">
+                  <template v-if="r.status === 'pending'">
+                    <button type="button" class="primary" @click="decide(r, true)">批准</button>
+                    <button type="button" class="danger" @click="decide(r, false)">拒绝</button>
+                  </template>
+                </td>
+              </tr>
+              <tr v-if="!requests.length"><td colspan="7" class="muted">{{ showAllRequests ? '还没有人申请过。' : '没有待处理的申请。' }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section v-else-if="tab === 'users'" class="panel">
         <form class="admin-toolbar" @submit.prevent="loadUsers">
           <input v-model="query" class="access-input" type="search" placeholder="搜索用户名">
           <button class="btn btn-secondary btn-small" type="submit">搜索</button>
@@ -153,7 +218,8 @@ onMounted(async () => {
                 <td class="actions">
                   <button type="button" @click="adjust(u)">调额度</button>
                   <button type="button" @click="showGens(u)">记录</button>
-                  <button type="button" @click="resetPassword(u)">重置密码</button>
+                  <button type="button" @click="setPassword(u)">设密码</button>
+                  <button type="button" @click="resetPassword(u)">随机重置</button>
                   <button v-if="u.username !== currentUser.username" type="button" :class="{ danger: u.status === 'active' }" @click="toggle(u)">{{ u.status === 'active' ? '停用' : '恢复' }}</button>
                 </td>
               </tr>
