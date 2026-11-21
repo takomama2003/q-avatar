@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { currentUser } from '../services/auth'
 import { useStudio } from '../stores/studio'
 
 const studio = useStudio()
@@ -33,6 +34,12 @@ const links = [
       </nav>
       <div class="header-actions">
         <span class="demo-tag" :class="{ live: studio.modelName.value }"><span class="demo-dot"></span><span class="demo-text">{{ studio.modelName.value ? `已配置 ${studio.modelName.value}` : '前端演示版' }}</span></span>
+        <RouterLink v-if="currentUser" class="account-chip" to="/account" :title="`${currentUser.username} · 剩余 ${currentUser.credits} 张`">
+          <span class="account-avatar" aria-hidden="true">{{ Array.from(currentUser.username)[0] }}</span>
+          <span class="account-name">{{ currentUser.username }}</span>
+          <span class="account-credits">{{ currentUser.credits }} 张</span>
+        </RouterLink>
+        <RouterLink v-else class="btn btn-secondary btn-small" :to="{ name: 'login', query: route.name === 'login' ? route.query : { redirect: route.fullPath } }">登录</RouterLink>
         <RouterLink class="btn btn-primary btn-small" to="/studio">开始创作</RouterLink>
       </div>
       <button type="button" class="menu-toggle" :aria-expanded="open" aria-controls="site-nav" :aria-label="open ? '收起菜单' : '打开菜单'" @click="open = !open">

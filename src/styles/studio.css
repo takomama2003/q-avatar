@@ -47,6 +47,9 @@
 
 .access { margin-top: 18px; padding: 14px 16px; border-radius: 16px; background: #faf6fd; }
 .access h3 { margin: 0; }
+.access.warn { background: #fff7e0; box-shadow: inset 0 0 0 1.5px var(--butter); }
+.access .credits { font: 600 16px/1 var(--font-latin); color: var(--grape-deep); }
+.access-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .access-input { display: block; width: 100%; margin-top: 8px; padding: 11px 14px; border: 1.5px solid var(--line); border-radius: 12px; background: #fff; font-size: 15px; transition: border-color .2s, box-shadow .2s; }
 .access-input:focus { outline: none; border-color: var(--grape); box-shadow: 0 0 0 4px rgb(111 82 168 / .16); }
 .access-input:disabled { opacity: .6; }

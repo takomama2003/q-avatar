@@ -25,7 +25,7 @@
     </div>
     <div class="container footer-bottom">
       <span>Tim_pet · LITTLE COLLECTION</span>
-      <span>本地运行 · 无需登录</span>
+      <span>照片和生成的图片不保存在服务器上</span>
     </div>
   </footer>
 </template>

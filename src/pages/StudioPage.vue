@@ -5,12 +5,13 @@ import { BACKGROUNDS, COMPOSITIONS, EXPRESSIONS, MAX_COUNT, MAX_DESCRIPTION, POS
 import FigureBox from '../components/FigureBox.vue'
 import OptionChips from '../components/OptionChips.vue'
 import StyleSwatch from '../components/StyleSwatch.vue'
+import { currentUser } from '../services/auth'
 import { useHistory } from '../stores/history'
 import { useStudio } from '../stores/studio'
 
 // 创作工坊页面只负责显示和交互；照片、选项和生成状态在 stores/studio.ts，切换页面不会丢。
 const studio = useStudio()
-const { photo, photoUrl, options, busy, validating, locked, error, failed, status, result, selected, current, elapsed, modelName, modeReady, charCount, needsCode, accessCode } = studio
+const { photo, photoUrl, options, busy, validating, locked, error, failed, status, result, selected, current, elapsed, modelName, modeReady, charCount, accounts, signedIn, accountProblem } = studio
 const { works } = useHistory()
 const route = useRoute()
 const router = useRouter()
@@ -80,9 +81,6 @@ function blockStrayDrop(event: DragEvent) {
   if (event.defaultPrevented || !event.dataTransfer?.types.includes('Files')) return
   event.preventDefault()
   event.dataTransfer.dropEffect = 'none'
-}
-function onAccessCode(event: Event) {
-  studio.setAccessCode((event.target as HTMLInputElement).value)
 }
 function onDescription(event: Event) {
   const input = event.target as HTMLTextAreaElement
@@ -214,10 +212,20 @@ onBeforeUnmount(() => { window.removeEventListener('dragover', blockStrayDrop); 
           </div>
         </div>
 
-        <div v-if="needsCode" class="access">
-          <div class="field-heading"><label for="access-code"><h3>邀请码</h3></label><span class="field-meta">{{ accessCode ? '已填写 · 真实生成' : '未填写 · 演示模式' }}</span></div>
-          <input id="access-code" class="access-input" type="password" autocomplete="off" :value="accessCode" :disabled="locked" placeholder="输入邀请码后才会真实生成" @change="onAccessCode">
-          <p class="field-hint">真实生成按张计费，所以需要邀请码，每个邀请码有自己的额度。没有邀请码也可以体验演示模式。</p>
+        <div v-if="accounts" class="access" :class="{ warn: accountProblem }">
+          <template v-if="!signedIn">
+            <div class="field-heading"><h3>登录后真实生成</h3><span class="field-meta">现在是演示模式</span></div>
+            <p class="field-hint">真实生成按张计费，需要登录并用兑换码领取张数。没有账号也可以先体验演示模式。</p>
+            <div class="access-actions">
+              <RouterLink class="btn btn-primary btn-small" :to="{ name: 'login', query: { redirect: '/studio' } }">登录</RouterLink>
+              <RouterLink class="btn btn-secondary btn-small" :to="{ name: 'login', query: { mode: 'register', redirect: '/studio' } }">注册</RouterLink>
+            </div>
+          </template>
+          <template v-else>
+            <div class="field-heading"><h3>{{ currentUser?.username }} 的额度</h3><span class="field-meta">剩余 <strong class="credits">{{ currentUser?.credits }}</strong> 张</span></div>
+            <p class="field-hint">{{ currentUser?.credits ? '每生成一张扣 1 张，上游明确拒绝的会退回。' : '额度用完了，去“我的账户”输入兑换码就能继续生成。' }}</p>
+            <div class="access-actions"><RouterLink class="btn btn-secondary btn-small" to="/account">{{ currentUser?.credits ? '我的账户' : '去兑换' }}</RouterLink></div>
+          </template>
         </div>
 
         <p v-if="error" :key="error" class="error" role="alert">

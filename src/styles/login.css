@@ -1,0 +1,72 @@
+/* 登录页：左边是会员款的展示盒，右边是一张“会员登记卡”——印刷带、票根虚线、盖章动画，和公仔包装同一套视觉。 */
+.login-page { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1fr); align-items: center; gap: 56px; padding-top: 48px; }
+
+.login-showcase { position: relative; }
+.login-showcase .box { height: 460px; margin: 0; transform: rotate(-1.5deg); box-shadow: inset 0 0 0 1.5px #e5d9c3, 0 30px 60px -36px rgb(83 58 134 / .55); }
+.login-showcase .window { min-height: 0; }
+.login-steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 0; padding: 0; list-style: none; }
+.login-steps li { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 7px; border-radius: 999px; background: rgb(255 253 248 / .8); border: 1.5px solid var(--line); font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.login-steps span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--lavender); color: var(--grape-deep); font: 600 12px/1 var(--font-latin); }
+
+/* 会员卡本体 */
+.login-card { position: relative; max-width: 480px; width: 100%; justify-self: start; padding: 0 0 0; overflow: hidden; }
+.card-band { display: flex; justify-content: space-between; padding: 12px 26px; background: var(--grape); color: #fff; font: 600 12px/1.4 var(--font-latin); letter-spacing: 2.4px; }
+.card-band span:last-child { color: var(--butter); }
+.card-tabs { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 22px 28px 0; padding: 4px; border-radius: 14px; background: #f3ede2; }
+.card-tabs button { padding: 10px 0; border: 0; border-radius: 10px; background: none; color: var(--ink-2); font-size: 15px; font-weight: 700; transition: background-color .2s, color .2s, box-shadow .2s; }
+.card-tabs button[aria-selected="true"] { background: #fff; color: var(--grape-deep); box-shadow: 0 2px 0 var(--lavender-2); }
+.card-tabs button:focus-visible { outline-offset: -2px; }
+
+.login-card h1 { margin: 22px 28px 0; font-size: 34px; animation: rise .45s var(--ease-out); }
+.login-lead { margin: 8px 28px 0; max-width: 400px; color: var(--ink-2); font-size: 14.5px; }
+.login-card form { display: grid; gap: 16px; padding: 22px 28px 26px; }
+
+.field { display: grid; gap: 7px; }
+.field-label { display: flex; align-items: baseline; justify-content: space-between; font-size: 14px; font-weight: 700; }
+.field-label small { font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.field input[type="text"], .field input[type="password"] { width: 100%; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 14px; background: #fff; font-size: 15.5px; transition: border-color .2s, box-shadow .2s; }
+.field input::placeholder { color: #9b91a3; }
+.field input:focus { outline: none; border-color: var(--grape); box-shadow: 0 0 0 4px rgb(111 82 168 / .16); }
+.field input:disabled { opacity: .6; }
+.field.invalid input { border-color: #d98a7c; }
+.field.invalid input:focus { box-shadow: 0 0 0 4px rgb(162 54 42 / .12); }
+.field-error { font-size: 13px; color: var(--danger); }
+.password-wrap { position: relative; display: block; }
+.password-wrap input { padding-right: 48px !important; }
+.peek { position: absolute; top: 50%; right: 6px; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 10px; background: none; color: var(--ink-3); transform: translateY(-50%); }
+.peek:hover { background: var(--lavender); color: var(--grape-deep); }
+.peek svg { width: 20px; height: 20px; }
+
+.privacy-note { display: flex; gap: 12px; padding: 14px 16px; border-radius: 16px; background: #faf6fd; border: 1.5px dashed var(--lavender-2); }
+.privacy-note > svg { flex: none; width: 22px; height: 22px; margin-top: 2px; color: var(--grape); }
+.privacy-note strong { font-size: 14px; }
+.privacy-note p { margin: 4px 0 10px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.agree { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--ink); cursor: pointer; }
+.agree input { flex: none; width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--grape); }
+
+.login-card form .error { margin: 0; }
+.login-submit { width: 100%; padding: 15px 22px; font: 400 19px/1.2 var(--font-display); letter-spacing: 1px; }
+.login-submit .spinner { margin-right: 4px; }
+.login-hint { margin: -4px 0 0; text-align: center; font-size: 13px; color: var(--ink-3); }
+
+/* 票根：虚线撕口 + 两侧半圆缺口 */
+.card-stub { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 16px 28px 20px; border-top: 2px dashed var(--line); background: rgb(240 231 214 / .45); font-size: 14px; color: var(--ink-2); }
+.card-stub::before, .card-stub::after { content: ""; position: absolute; top: -12px; width: 22px; height: 22px; border-radius: 50%; background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--line); }
+.card-stub::before { left: -12px; }
+.card-stub::after { right: -12px; }
+
+@media (max-width: 960px) {
+  .login-page { grid-template-columns: 1fr; gap: 28px; padding-top: 28px; }
+  .login-showcase { order: 2; width: 100%; max-width: 480px; justify-self: center; }
+  .login-showcase .box { height: 360px; }
+  .login-steps { justify-content: center; }
+  .login-card { justify-self: center; }
+}
+@media (max-width: 480px) {
+  .login-page { padding-top: 16px; }
+  .login-showcase { display: none; }
+  .login-card h1 { margin: 18px 20px 0; font-size: 28px; }
+  .login-lead, .card-tabs { margin-left: 20px; margin-right: 20px; }
+  .login-card form { padding: 18px 20px 22px; }
+  .card-band, .card-stub { padding-left: 20px; padding-right: 20px; }
+}

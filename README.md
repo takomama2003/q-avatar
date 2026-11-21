@@ -78,7 +78,7 @@ npm run dev
 
 ## 部署到服务器
 
-`server/production.ts` 是公网部署用的后端：只提供 `/api`，只监听本机，由 nginx 转发；配置了模型密钥却没有设置访问口令（`ACCESS_CODE`）时拒绝启动。真实生成需要输入主口令或邀请码；每个邀请码有自己的总额度，用 `server/codes.ts` 管理。另有全站每天总张数的上限。nginx 配置、systemd 服务文件和完整步骤见 [deploy/README.md](deploy/README.md)。
+`server/production.ts` 是公网部署用的后端：只提供 `/api`，只监听本机，由 nginx 转发。v0.2 起有账号系统：任何人都能注册，真实生成要登录，并用兑换码领取张数；管理员在 `/admin` 后台管理账号、额度和兑换码，查看用量和生成记录。数据存在 `data/app.db`（Node 24 自带的 SQLite）。另有全站每天总张数的上限。nginx 配置、systemd 服务文件和完整步骤见 [deploy/README.md](deploy/README.md)。
 
 ## 许可证
 

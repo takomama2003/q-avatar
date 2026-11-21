@@ -9,11 +9,14 @@ export interface GenerationResult {
   source: 'demo' | 'model'
   model?: string
   warning?: string
-  quotaLeft?: number // 用邀请码生成时，这个邀请码还剩几张
+  balance?: number // 登录用户生成后剩余的张数
 }
-export type ServiceMode = { kind: 'demo'; problem?: string } | { kind: 'model'; model: string; needsCode: boolean; remainingToday?: number }
-// 口令错误时抛出这个错误，页面据此清掉保存的口令、让用户重新输入。
-export class AccessCodeError extends Error {}
+export type ServiceMode = { kind: 'demo'; problem?: string } | { kind: 'model'; model: string; accounts: boolean; remainingToday?: number }
+// 需要登录（login_required）或额度用完（no_credits）时抛出，页面据此引导去登录或兑换。
+export class AccountError extends Error {
+  code: 'login_required' | 'no_credits'
+  constructor(message: string, code: 'login_required' | 'no_credits') { super(message); this.code = code }
+}
 const apiUrl = (path: string) => `${import.meta.env.BASE_URL}api/${path}`
 const extensionOf = (type: string) => {
   const subtype = type.split(/[/;]/)[1]?.trim() || 'png'
@@ -27,7 +30,7 @@ export async function detectMode(): Promise<ServiceMode> {
     const json = response.headers.get('content-type')?.includes('application/json')
     const config = json && (response.ok || response.status === 403) ? await response.json().catch(() => null) : null
     if (response.ok && config?.enabled === true && typeof config.model === 'string') {
-      return { kind: 'model', model: config.model, needsCode: config.needsCode === true, remainingToday: typeof config.remainingToday === 'number' ? config.remainingToday : undefined }
+      return { kind: 'model', model: config.model, accounts: config.accounts === true, remainingToday: typeof config.remainingToday === 'number' ? config.remainingToday : undefined }
     }
     // 403：后端拒绝了这个页面地址（例如用局域网 IP 打开）；把原因告诉用户，而不是悄悄回到演示模式。
     const problem = typeof config?.problem === 'string' ? config.problem : response.status === 403 && typeof config?.error === 'string' ? config.error : undefined
@@ -51,7 +54,7 @@ export async function generateDemo(input: GenerationInput): Promise<GenerationRe
 }
 
 // 真实生成：照片和选项发给本地后端，由后端带着密钥调用图像模型。
-export async function generateWithModel(input: GenerationInput, model: string, accessCode = ''): Promise<GenerationResult> {
+export async function generateWithModel(input: GenerationInput, model: string): Promise<GenerationResult> {
   const form = new FormData()
   form.append('photo', input.photo)
   const { description, count, ...choices } = input.options
@@ -59,8 +62,7 @@ export async function generateWithModel(input: GenerationInput, model: string, a
   form.append('description', description)
   form.append('count', String(count))
   let response: Response
-  const headers = accessCode ? { 'X-Access-Code': accessCode } : undefined
-  try { response = await fetch(apiUrl('generate'), { method: 'POST', body: form, headers, signal: AbortSignal.timeout(330_000) }) }
+  try { response = await fetch(apiUrl('generate'), { method: 'POST', body: form, credentials: 'same-origin', signal: AbortSignal.timeout(330_000) }) }
   catch (error) {
     throw new Error(error instanceof DOMException && error.name === 'TimeoutError'
       ? '等待超过 5 分钟仍没有结果。这次可能仍会生成并扣费，请稍等一会儿再重试。'
@@ -68,7 +70,7 @@ export async function generateWithModel(input: GenerationInput, model: string, a
   }
   const body = response.headers.get('content-type')?.includes('application/json') ? await response.json().catch(() => null) : null
   const message = typeof body?.error === 'string' ? body.error : `生成失败（HTTP ${response.status}），请稍后重试。`
-  if (response.status === 401 && body?.code === 'bad_code') throw new AccessCodeError(message)
+  if (body?.code === 'login_required' || body?.code === 'no_credits') throw new AccountError(message, body.code)
   if (!response.ok) throw new Error(message)
   const urls: unknown[] = Array.isArray(body?.images) ? body.images : []
   const images: GeneratedImage[] = []
@@ -78,6 +80,6 @@ export async function generateWithModel(input: GenerationInput, model: string, a
     images.push({ url: URL.createObjectURL(blob), blob, extension: extensionOf(blob.type) })
   }
   if (!images.length) throw new Error('后端没有返回图片，请查看终端日志。')
-  const quotaLeft = typeof body?.quotaLeft === 'number' ? body.quotaLeft : undefined
-  return { images, options: { ...input.options }, source: 'model', model, warning: typeof body?.warning === 'string' ? body.warning : undefined, quotaLeft }
+  const balance = typeof body?.balance === 'number' ? body.balance : undefined
+  return { images, options: { ...input.options }, source: 'model', model, warning: typeof body?.warning === 'string' ? body.warning : undefined, balance }
 }

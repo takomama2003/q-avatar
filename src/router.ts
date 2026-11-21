@@ -10,6 +10,9 @@ const router = createRouter({
     { path: '/studio', name: 'studio', component: StudioPage, meta: { title: '创作工坊 · Tim_pet' } },
     { path: '/gallery', name: 'gallery', component: () => import('./pages/GalleryPage.vue'), meta: { title: '作品画廊 · Tim_pet' } },
     { path: '/help', name: 'help', component: () => import('./pages/HelpPage.vue'), meta: { title: '使用说明 · Tim_pet' } },
+    { path: '/login', name: 'login', component: () => import('./pages/LoginPage.vue'), meta: { title: '登录 · Tim_pet' } },
+    { path: '/account', name: 'account', component: () => import('./pages/AccountPage.vue'), meta: { title: '我的账户 · Tim_pet' } },
+    { path: '/admin', name: 'admin', component: () => import('./pages/AdminPage.vue'), meta: { title: '管理后台 · Tim_pet' } },
     { path: '/:rest(.*)*', name: 'not-found', component: () => import('./pages/NotFoundPage.vue'), meta: { title: '页面不存在 · Tim_pet' } },
   ],
   scrollBehavior(to, _from, saved) {

@@ -8,36 +8,38 @@
 - HTTPS 证书：Let's Encrypt 的 IP 证书，约 6 天有效，见下面“HTTPS 证书”。
 - 后端 `node server/production.ts` 只监听 127.0.0.1:8787，由 systemd 管理，开机自启、出错自动重启，用系统用户 `qavatar` 运行。配置：`q-avatar.service` → `/etc/systemd/system/q-avatar.service`。
 - Node.js v24.22.3 装在 `/opt/node/current`，链接到 `/usr/local/bin/node`。
-- 服务器上的 `/opt/q-avatar/.env`（root:qavatar，640）存放 API 密钥和访问控制配置，不在仓库里。
-- 日志：`/opt/q-avatar/logs/image-api.log`，也可以 `sudo journalctl -u q-avatar -f`。当天已用张数：`/opt/q-avatar/data/usage.json`。
+- 服务器上的 `/opt/q-avatar/.env`（root:qavatar，640）存放 API 密钥和每天上限等配置，不在仓库里。
+- 日志：`/opt/q-avatar/logs/image-api.log`，也可以 `sudo journalctl -u q-avatar -f`。账号和用量：`/opt/q-avatar/data/app.db`。
 
-## 访问控制（.env）
+## 配置（.env）
 
 ```ini
-ACCESS_CODE=...          # 主口令（站长自己用），至少 6 个字符，不受个人额度限制；没有它后端拒绝启动
-DAILY_IMAGE_LIMIT=20     # 每天最多生成多少张（所有人合计，北京时间零点重置）
+DAILY_IMAGE_LIMIT=1000   # 全站每天最多生成多少张（所有人合计，北京时间零点重置）；不写时默认 20
 PORT=8787
 ```
 
-改完执行 `sudo systemctl restart q-avatar`。
+改完执行 `sudo systemctl restart q-avatar`。v0.1 的 `ACCESS_CODE`、`IP_HOURLY_LIMIT` 已经不用了，留着也不影响。
 
 上游明确拒绝（余额不足、参数错误、没通过审核、连不上）的张数会退回额度；超时等可能已经扣费的照常计入。
 
-## 邀请码管理
+## 账号和管理后台（v0.2）
 
-给朋友发邀请码，每人一个码、各有总额度。在服务器上用后端的运行账户执行：
+- 任何人都能在 `/login` 注册；真实生成要登录，并在“我的账户”（`/account`）输入兑换码领取张数。没登录可以用演示模式。
+- 管理员在 `/admin`：用户（搜索、调额度、停用、重置密码）、兑换码（生成、停用）、用量统计、生成记录。每次修改都记进 `admin_log`。
+- 照片和生成的图片不保存在服务器上；生成记录只记时间、用户、风格、张数和结果。
+- 数据在 `data/app.db`，后端每天自动备份到 `data/backups/`，保留 7 天。
+
+**命令行应急工具**（后台进不去时用；用后端的运行账户执行，让数据库文件归属一致）：
 
 ```bash
 cd /opt/q-avatar
-sudo -u qavatar node server/codes.ts add 小王 --quota 10   # 新建（默认 10 张），邀请码只显示这一次
-sudo -u qavatar node server/codes.ts list                  # 总额度、已用、剩余、状态、最近使用
-sudo -u qavatar node server/codes.ts quota 小王 20          # 把总额度改成 20
-sudo -u qavatar node server/codes.ts disable 小王           # 停用；enable 恢复
+sudo -u qavatar node server/admin-cli.ts create-admin tim        # 建管理员，临时密码只显示一次
+sudo -u qavatar node server/admin-cli.ts reset-password tim      # 重置密码，所有设备下线
+sudo -u qavatar node server/admin-cli.ts voucher 20 --note 给小王 # 建兑换码（--uses N 可兑换 N 次）
+sudo -u qavatar node server/admin-cli.ts users                   # 列出账号和余额
 ```
 
-- 清单在 `data/codes.json`，只存邀请码的 SHA-256；每人用量在 `data/code-usage.json`。
-- 后端自动读取清单的修改，不用重启。
-- 邀请码忘了不能找回，只能停用后用新名字再建一个。
+**从 v0.1 升级**：部署后执行一次 `sudo -u qavatar node server/migrate-v02.ts`。它先备份 `data/`，再把 v0.1 的邀请码转成兑换码：哈希不变，所以原来的码可以直接在“我的账户”兑换，额度等于原来剩余的张数，只能兑换 1 次。重复运行不会重复创建。
 
 ## 首次部署
 
@@ -76,7 +78,7 @@ sudo -u qavatar node server/codes.ts disable 小王           # 停用；enable 
    ```
 
 6. 按下面“HTTPS 证书”申请证书。
-7. 打开 `https://<服务器IP>` 检查：不填口令只能用演示模式，填入口令后能真实生成。
+7. 建管理员账号（见上面“命令行应急工具”），打开 `https://<服务器IP>/login` 登录，在 `/admin` 生成兑换码，用另一个账号注册、兑换、真实生成一张。
 
 ## 一键部署
 
