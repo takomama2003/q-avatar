@@ -1,0 +1,66 @@
+/* 管理后台：左边分区导航，右边标题 + 表格；操作用按钮和每行的“更多”菜单，输入都在弹窗里。 */
+.admin-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
+.admin-nav { position: sticky; top: 96px; display: grid; gap: 2px; }
+.admin-nav-title { margin: 0 0 var(--sp-2); padding: 0 var(--sp-3); font-size: var(--fs-xs); font-weight: 600; letter-spacing: 1px; color: var(--c-text-3); }
+.admin-nav button { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--r-sm); background: none; color: var(--c-text-2); font-size: var(--fs-sm); font-weight: 600; text-align: left; }
+.admin-nav button svg { width: 18px; height: 18px; }
+.admin-nav button:hover { background: var(--c-brand-soft); color: var(--c-text); }
+.admin-nav button.active { background: var(--c-brand-soft); color: var(--c-brand); }
+.admin-main { display: grid; gap: var(--sp-4); min-width: 0; }
+.admin-main > .ui-alert { margin: 0; }
+.admin-main > section { min-width: 0; }
+.admin-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sp-3) var(--sp-5); margin-bottom: var(--sp-4); }
+.admin-head h1 { margin: 0; font-size: var(--fs-2xl); font-weight: 700; }
+.admin-head p { margin: var(--sp-1) 0 0; max-width: 560px; font-size: var(--fs-sm); color: var(--c-text-2); }
+.admin-search { display: flex; gap: var(--sp-2); }
+.admin-search .ui-input { width: 220px; }
+.admin-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); }
+.admin-toolbar .grow { flex: 1; }
+
+/* 表格 */
+.admin-table { position: relative; overflow-x: auto; }
+.admin-table h2 { margin: 0; padding: var(--sp-4) var(--sp-4) var(--sp-2); font-size: var(--fs-md); font-weight: 700; }
+.admin-table table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.admin-table th, .admin-table td { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--c-line); text-align: left; vertical-align: middle; white-space: nowrap; }
+.admin-table th { font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-3); background: #fbf8f2; }
+.admin-table tbody tr:last-child td { border-bottom: 0; }
+.admin-table tbody tr:hover td { background: #fcfaf6; }
+.admin-table td.num, .admin-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.admin-table td.wrap { min-width: 140px; max-width: 280px; white-space: normal; overflow-wrap: anywhere; }
+.admin-table td.act, .admin-table th.act { width: 1%; text-align: right; }
+.admin-table tr.off td { color: var(--c-text-3); }
+.admin-table td .ui-tag { margin-left: var(--sp-2); }
+.admin-table td .ui-tag:first-child { margin-left: 0; }
+.admin-table .empty-row { padding: var(--sp-6) var(--sp-4); text-align: center; color: var(--c-text-3); }
+.row-actions { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.row-more { width: 32px; padding: 0; }
+.row-more svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
+.row-menu .ui-menu { min-width: 168px; text-align: left; }
+
+/* 统计 */
+.stat-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.stat-tiles > div { display: grid; gap: var(--sp-1); padding: var(--sp-4); }
+.stat-tiles span { font-size: var(--fs-xs); color: var(--c-text-3); }
+.stat-tiles strong { font: 600 var(--fs-2xl)/1.1 var(--font-latin); font-variant-numeric: tabular-nums; }
+.stat-split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+
+/* 弹窗里的说明和错误 */
+.modal-text { margin: 0 0 var(--sp-3); font-size: var(--fs-sm); line-height: 1.7; color: var(--c-text-2); }
+.modal-error { margin-top: var(--sp-3); }
+code.ui-secret { display: block; padding: var(--sp-3) var(--sp-4); border: 1px dashed var(--c-brand-line); border-radius: var(--r-sm); background: var(--c-brand-soft); font: 600 var(--fs-xl)/1.3 var(--font-latin); letter-spacing: 1px; text-align: center; color: var(--c-brand); user-select: all; word-break: break-all; }
+
+@media (max-width: 1100px) {
+  .stat-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .admin-layout { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+  .admin-nav { position: static; display: flex; gap: var(--sp-1); min-width: 0; overflow-x: auto; }
+  .admin-nav-title { display: none; }
+  .admin-nav button { flex: none; white-space: nowrap; }
+  .stat-split { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .stat-tiles { grid-template-columns: 1fr 1fr; }
+  .admin-search { width: 100%; }
+  .admin-search .ui-input { flex: 1; width: auto; }
+}

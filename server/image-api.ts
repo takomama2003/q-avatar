@@ -3,6 +3,7 @@ import OpenAI, { APIConnectionError, APIConnectionTimeoutError, APIError, APIUse
 // 后端直接用 node 运行（测试），所以这里的 import 要写 .ts 扩展名。
 import { BACKGROUNDS, COMPOSITIONS, DEFAULT_OPTIONS, EXPRESSIONS, MAX_COUNT, MAX_DESCRIPTION, POSES, PROPORTIONS, RATIOS, STYLES } from '../shared/options.ts'
 import type { BackgroundId, Composition, CreationOptions, ExpressionId, PoseId, ProportionId, StyleId } from '../shared/options.ts'
+import { labelPng } from './ai-label.ts'
 import { clientIp } from './auth.ts'
 
 // 本地后端：把照片转发给兼容 OpenAI 接口的图像模型。密钥只在服务端读取，不进入前端代码。
@@ -216,10 +217,12 @@ async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready,
     if (item.status === 'fulfilled') images.push(item.value)
     else {
       failures.push(describeUpstreamError(item.reason, setup))
-      if (clearlyNotBilled(item.reason)) unbilled++
+      // 没拿到图就退回这一张；上游可能已经扣了费（超时等），由站长承担，日志里留着原因方便对账。
+      unbilled++
+      if (!clearlyNotBilled(item.reason)) log(`[billing] 可能已被上游计费但未交付，已退回用户：${failures[failures.length - 1].log}`)
     }
   }
-  // 记下结果；上游直接拒绝或连不上的那几张没有扣费，退回额度；超时等说不准的照常计入。
+  // 记下结果；没生成出来的张数全部退回给用户。
   let balance: number | undefined
   if (gate) {
     // 记账失败也要把已经付过钱的图片交给用户；记账问题写进日志，由管理员手动补。
@@ -237,7 +240,7 @@ async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready,
   if (!images.length) {
     const first = failures[0]
     log(`[image-api] 生成失败 ${what} · ${seconds(started)}s · ${first.log}`)
-    return sendJson(req, res, first.status, { error: first.message, balance })
+    return sendJson(req, res, first.status, { error: gate ? forCustomer(first, unbilled) : first.message, balance })
   }
   const usage = images.reduce((sum, image) => ({ input: sum.input + (image.usage?.input_tokens ?? 0), output: sum.output + (image.usage?.output_tokens ?? 0) }), { input: 0, output: 0 })
   const tokens = images.some(image => image.usage) ? ` · tokens 输入 ${usage.input} / 输出 ${usage.output}` : ''
@@ -246,11 +249,20 @@ async function generate(req: IncomingMessage, res: ServerResponse, setup: Ready,
   const partial = failures.length ? ` · 失败 ${failures.length} 张：${failures[0].log}` : ''
   log(`[image-api] 生成完成 ${what} · ${seconds(started)}s${mode}${tokens}${partial}`)
   sendJson(req, res, 200, {
-    images: images.map(image => `data:${IMAGE_TYPES[image.kind]};base64,${Buffer.from(image.bytes).toString('base64')}`),
+    images: images.map(image => `data:${IMAGE_TYPES[image.kind]};base64,${Buffer.from(image.kind === 'png' ? labelPng(image.bytes, { site: 'Tim_pet', at: new Date() }) : image.bytes).toString('base64')}`),
     failed: failures.length,
-    warning: failures.length ? `有 ${failures.length} 张没有生成成功：${failures[0].message}` : undefined,
+    warning: failures.length ? `有 ${failures.length} 张没有生成成功：${gate ? forCustomer(failures[0], unbilled) : failures[0].message}` : undefined,
     balance,
   })
+}
+
+// 公网账号模式下给顾客看的提示：只说顾客自己能处理的原因（审核、照片太大、透明背景），
+// 其余（密钥、中转、超时、配置）一律说“没成功、张数已退回”，详细原因只写进日志给站长看。
+function forCustomer(failure: ReturnType<typeof describeUpstreamError>, refunded: number) {
+  const back = refunded ? `没生成出来的 ${refunded} 张已经退回。` : ''
+  if (failure.status === 422 || failure.status === 413) return `${failure.message}${back}`
+  if (/透明背景/.test(failure.message)) return `透明背景这次没有生成成功，请换一种背景后重试。${back}`
+  return `这次没有生成成功，${back || ''}请稍后再试；一直不成功请联系客服。`
 }
 
 // 上游返回了明确的 4xx 拒绝（参数、密钥、余额、审核、频率），或者根本没连上：这一张没有扣费。

@@ -5,7 +5,7 @@ import type { CreationOptions, GenerationResult } from '../services/generator'
 export interface WorkRecord {
   id: string
   createdAt: number
-  source: 'demo' | 'model'
+  source: 'demo' | 'model' // 'demo' 只出现在旧版本存下的作品里
   model?: string
   options: CreationOptions
   blob: Blob

@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 // v0.2 账号接口（后端见实施计划：POST /api/auth/login、/api/auth/register、/api/auth/logout，GET /api/auth/me）。
 // 登录状态放在 HttpOnly Cookie 里，前端拿不到令牌，只记当前用户的公开信息。
-export interface User { username: string; role: 'user' | 'admin'; credits: number }
+export interface User { username: string; role: 'user' | 'admin'; credits: number; avatar: string }
 
 export const USERNAME_MIN = 3
 export const USERNAME_MAX = 20
@@ -42,7 +42,7 @@ async function request(path: string, init: RequestInit = {}): Promise<User | nul
     throw new Error(error instanceof DOMException && error.name === 'TimeoutError' ? '服务器太久没有响应，请稍后重试。' : '连不上服务器，请检查网络后重试。')
   }
   const body = response.headers.get('content-type')?.includes('application/json') ? await response.json().catch(() => null) : null
-  if (response.status === 404 && !body?.user) throw new Error('账号功能还没有上线，可以先用演示模式体验。')
+  if (response.status === 404 && !body?.user) throw new Error('服务暂时不可用，请稍后再试。')
   if (!response.ok) throw new Error(typeof body?.error === 'string' ? body.error : `出错了（HTTP ${response.status}），请稍后重试。`)
   return body?.user ?? null
 }

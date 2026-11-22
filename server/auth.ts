@@ -21,7 +21,7 @@ const LOGIN_FAILS_PER_IP = 30 // 同一个 IP 15 分钟内输错这么多次就�
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
 const REGISTER_PER_IP_PER_HOUR = 5
 
-export type User = { id: number; username: string; role: 'user' | 'admin'; status: 'active' | 'disabled' }
+export type User = { id: number; username: string; role: 'user' | 'admin'; status: 'active' | 'disabled'; avatar: string }
 export type AuthError = { status: number; error: string }
 export type AuthOptions = { now?: () => number; secureCookie?: boolean }
 
@@ -125,7 +125,7 @@ export function createAuth(db: Db, options: AuthOptions = {}) {
     const token = readCookie(req, SESSION_COOKIE)
     if (!token || token.length > 100) return null
     const row = db.prepare(`
-      SELECT u.id, u.username, u.role, u.status, s.token_hash, s.last_seen_at, s.expires_at
+      SELECT u.id, u.username, u.role, u.status, u.avatar, s.token_hash, s.last_seen_at, s.expires_at
       FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`).get(sha256(token)) as
       (User & { token_hash: string; last_seen_at: string; expires_at: string }) | undefined
     if (!row || Date.parse(row.expires_at) <= now() || row.status !== 'active') return null
@@ -134,7 +134,7 @@ export function createAuth(db: Db, options: AuthOptions = {}) {
         .run(nowIso(now()), nowIso(now() + SESSION_IDLE_MS), row.token_hash)
       if (res && !res.headersSent) res.setHeader('Set-Cookie', cookie(token, SESSION_IDLE_MS / 1000))
     }
-    return { id: row.id, username: row.username, role: row.role, status: row.status }
+    return { id: row.id, username: row.username, role: row.role, status: row.status, avatar: row.avatar }
   }
 
   return {
@@ -145,7 +145,7 @@ export function createAuth(db: Db, options: AuthOptions = {}) {
     async register(req: IncomingMessage, res: ServerResponse, body: { username?: unknown; password?: unknown; privacyAccepted?: unknown }): Promise<User | AuthError> {
       const problem = checkUsername(body.username) || checkPassword(body.password)
       if (problem) return { status: 400, error: problem }
-      if (body.privacyAccepted !== true) return { status: 400, error: '请先确认你了解照片的去向。' }
+      if (body.privacyAccepted !== true) return { status: 400, error: '请先阅读并同意《用户协议》和《隐私政策》。' }
       const ip = clientIp(req)
       if (registrations.count(ip) >= REGISTER_PER_IP_PER_HOUR) return { status: 429, error: '这个网络注册得太频繁了，请一小时后再试。' }
       const username = (body.username as string).trim().normalize('NFKC')
@@ -165,7 +165,7 @@ export function createAuth(db: Db, options: AuthOptions = {}) {
         throw error
       }
       startSession(res, id)
-      return { id, username, role: 'user', status: 'active' }
+      return { id, username, role: 'user', status: 'active', avatar: '' }
     },
 
     async login(req: IncomingMessage, res: ServerResponse, body: { username?: unknown; password?: unknown }): Promise<User | AuthError> {
@@ -181,16 +181,16 @@ export function createAuth(db: Db, options: AuthOptions = {}) {
       // 先记一次再算哈希：同时发很多个请求时，每个都会占用名额，绕不过限制。成功了再撤回。
       accountFails.add(key)
       ipFails.add(ip)
-      const row = db.prepare('SELECT id, username, role, status, password_hash FROM users WHERE username_key = ?').get(usernameKey(body.username)) as
+      const row = db.prepare('SELECT id, username, role, status, avatar, password_hash FROM users WHERE username_key = ?').get(usernameKey(body.username)) as
         (User & { password_hash: string }) | undefined
       const ok = row ? await verifyPassword(body.password, row.password_hash) : (await verifyPassword(body.password, await DUMMY_HASH), false)
       if (!row || !ok) return { status: 401, error: '用户名或密码不对。' }
       ipFails.undo(ip)
-      if (row.status !== 'active') return { status: 403, error: '这个账号已停用，请联系 Tim。' }
+      if (row.status !== 'active') return { status: 403, error: '这个账号已停用，请联系客服。' }
       accountFails.clear(key)
       db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(nowIso(now()), row.id)
       startSession(res, row.id)
-      return { id: row.id, username: row.username, role: row.role, status: row.status }
+      return { id: row.id, username: row.username, role: row.role, status: row.status, avatar: row.avatar }
     },
 
     // 用户自己改密码：要先输对旧密码。改完其他设备下线，当前设备换一个新的登录令牌继续用。

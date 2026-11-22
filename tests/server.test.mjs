@@ -61,7 +61,18 @@ function photoForm({ photo = PNG, type = 'image/png', name = 'photo.png', compos
   return form
 }
 // 成功时后端返回 { images: [data URL…], failed, warning }
-const dataUrlBytes = url => Buffer.from(url.split(',')[1], 'base64')
+// 后端会在 PNG 里插入 AI 生成标识（iTXt 块）；比较图像内容时先去掉这些块。
+const withoutLabels = png => {
+  if (png.subarray(1, 4).toString('latin1') !== 'PNG') return png
+  const parts = [png.subarray(0, 8)]
+  for (let i = 8; i < png.length;) {
+    const end = i + 12 + png.readUInt32BE(i)
+    if (png.subarray(i + 4, i + 8).toString('latin1') !== 'iTXt') parts.push(png.subarray(i, end))
+    i = end
+  }
+  return Buffer.concat(parts)
+}
+const dataUrlBytes = url => withoutLabels(Buffer.from(url.split(',')[1], 'base64'))
 const post = (url, body, headers) => fetch(`${url}/api/generate`, { method: 'POST', body, headers })
 const ok = () => (req, res) => json(res, 200, { created: 1, data: [{ b64_json: PNG.toString('base64') }] })
 // 解析假上游收到的 multipart 请求体

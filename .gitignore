@@ -8,3 +8,6 @@ logs/
 data/
 deploy.local
 .local/
+
+# 客服联系方式（手机号、微信二维码）只放在本机和服务器，不进开源仓库
+public/contact/

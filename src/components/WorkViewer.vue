@@ -32,7 +32,7 @@ const details = computed(() => {
     ...(o.composition === 'full' ? [['姿势', nameOf(POSES, o.pose)]] : []),
     ['背景', nameOf(BACKGROUNDS, o.background)],
     ['描述', o.description || '（没有填写）'],
-    ['来源', work.source === 'model' ? `AI 生成 · ${work.model ?? ''}` : '演示示例（不是根据照片生成）'],
+    ['来源', work.source === 'model' ? 'AI 生成' : '旧版示例图'],
     ['时间', new Date(work.createdAt).toLocaleString('zh-CN')],
   ]
 })
@@ -59,11 +59,12 @@ async function remove() {
     <div v-if="work" class="viewer-body">
       <div class="viewer-image" :class="work.options.background === 'transparent' ? 'checker' : `bg-${work.options.background}`">
         <img :src="work.url" :alt="`${nameOf(STYLES, work.options.style)}作品大图`">
+        <span v-if="work.source === 'model'" class="ai-mark">AI 生成</span>
       </div>
       <div class="viewer-info">
         <header>
           <div>
-            <p class="eyebrow">{{ work.source === 'model' ? 'AI 生成' : '示例' }}</p>
+            <span class="ui-tag">{{ work.source === 'model' ? 'AI 生成' : '示例' }}</span>
             <h2 id="viewer-title">{{ nameOf(STYLES, work.options.style) }}</h2>
           </div>
           <button type="button" class="viewer-close" aria-label="关闭" @click="emit('close')">
@@ -72,12 +73,12 @@ async function remove() {
         </header>
         <dl><template v-for="[term, value] in details" :key="term"><dt>{{ term }}</dt><dd>{{ value }}</dd></template></dl>
         <div class="viewer-actions">
-          <a class="btn btn-primary btn-small" :href="work.url" :download="fileName">下载这张</a>
-          <button type="button" class="btn btn-secondary btn-small" @click="reuse">用同样的设置再做</button>
-          <button v-if="!confirming" type="button" class="btn btn-danger btn-small" @click="confirming = true">删除</button>
+          <a class="ui-btn ui-btn-primary ui-btn-sm" :href="work.url" :download="fileName">下载这张</a>
+          <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" @click="reuse">用同样的设置再做</button>
+          <button v-if="!confirming" type="button" class="ui-btn ui-btn-danger ui-btn-sm" @click="confirming = true">删除</button>
           <span v-else class="confirm-row">
-            <button type="button" class="btn btn-danger btn-small" @click="remove">确认删除</button>
-            <button type="button" class="btn btn-ghost btn-small" @click="confirming = false">取消</button>
+            <button type="button" class="ui-btn ui-btn-danger ui-btn-sm" @click="remove">确认删除</button>
+            <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" @click="confirming = false">取消</button>
           </span>
         </div>
       </div>

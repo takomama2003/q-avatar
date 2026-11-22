@@ -2,16 +2,18 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomePage from './pages/HomePage.vue'
 import StudioPage from './pages/StudioPage.vue'
 
-// 首页和工坊直接打包；画廊、帮助和 404 按需加载。
+// 首页和工坊直接打包；其余页面按需加载。
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', name: 'home', component: HomePage, meta: { title: 'Tim_pet · 你的公仔工作室' } },
     { path: '/studio', name: 'studio', component: StudioPage, meta: { title: '创作工坊 · Tim_pet' } },
     { path: '/gallery', name: 'gallery', component: () => import('./pages/GalleryPage.vue'), meta: { title: '作品画廊 · Tim_pet' } },
-    { path: '/help', name: 'help', component: () => import('./pages/HelpPage.vue'), meta: { title: '使用说明 · Tim_pet' } },
+    { path: '/help', name: 'help', component: () => import('./pages/HelpPage.vue'), meta: { title: '使用帮助 · Tim_pet' } },
     { path: '/login', name: 'login', component: () => import('./pages/LoginPage.vue'), meta: { title: '登录 · Tim_pet' } },
     { path: '/account', name: 'account', component: () => import('./pages/AccountPage.vue'), meta: { title: '我的账户 · Tim_pet' } },
+    { path: '/terms', name: 'terms', component: () => import('./pages/TermsPage.vue'), meta: { title: '用户协议 · Tim_pet' } },
+    { path: '/privacy', name: 'privacy', component: () => import('./pages/PrivacyPage.vue'), meta: { title: '隐私政策 · Tim_pet' } },
     { path: '/admin', name: 'admin', component: () => import('./pages/AdminPage.vue'), meta: { title: '管理后台 · Tim_pet' } },
     { path: '/:rest(.*)*', name: 'not-found', component: () => import('./pages/NotFoundPage.vue'), meta: { title: '页面不存在 · Tim_pet' } },
   ],

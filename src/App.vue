@@ -10,9 +10,9 @@ const studio = useStudio()
 const route = useRoute()
 void studio.init()
 const toast = computed(() => studio.unseen.value && route.name !== 'studio')
-// 真实生成进行中关闭或刷新页面会丢掉这次结果（但可能已经扣费），先提醒一下。
+// 生成进行中关闭或刷新页面会丢掉这次结果，先提醒一下。
 function warnBeforeLeave(event: BeforeUnloadEvent) {
-  if (studio.busy.value && studio.modelName.value) event.preventDefault()
+  if (studio.busy.value) event.preventDefault()
 }
 onMounted(() => window.addEventListener('beforeunload', warnBeforeLeave))
 onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeLeave))
@@ -27,7 +27,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeLeave
   <AppFooter />
   <div v-if="toast" class="toast" role="status">
     <strong>你的公仔生成好了</strong>
-    <RouterLink class="btn btn-primary" to="/studio">去看看</RouterLink>
+    <RouterLink class="ui-btn ui-btn-primary ui-btn-sm" to="/studio">去看看</RouterLink>
     <button type="button" class="toast-close" aria-label="关闭提示" @click="studio.unseen.value = false">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" /></svg>
     </button>

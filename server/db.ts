@@ -96,6 +96,21 @@ const MIGRATIONS: string[] = [
   -- 每个人同时只能有一个待处理的申请
   CREATE UNIQUE INDEX credit_requests_one_pending ON credit_requests(user_id) WHERE status = 'pending';
   `,
+  // 3：v0.2.0 改成只用兑换码买张数，去掉额度申请；加上用户自选的公仔头像（只存编号，见 shared/avatars.ts）。
+  `
+  DROP TABLE IF EXISTS credit_requests;
+  ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT '';
+  `,
+  // 4：v0.2.0 用户自己上传的头像（浏览器裁成正方形、缩小后重新编码的 PNG，最大 300 KiB，见 server/avatar-image.ts）。每人一张，换回内置头像时删除。
+  // users.avatar 为 'upload' 时用这张图。
+  `
+  CREATE TABLE user_avatars (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    mime TEXT NOT NULL CHECK (mime = 'image/png'),
+    bytes BLOB NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ]
 
 export type Db = DatabaseSync
